@@ -1,0 +1,33 @@
+"""Configuration management for OBD SuperStar Agent."""
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from project root
+PROJECT_ROOT = Path(__file__).parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
+# --- Azure OpenAI Configuration ---
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.1-chat")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
+
+# --- Default Provider ---
+DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "azure_openai")
+
+# --- ElevenLabs Configuration ---
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
+ELEVENLABS_TTS_MODEL = "eleven_v3"
+ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
+
+# --- App Configuration ---
+OUTPUTS_DIR = Path(__file__).parent / "outputs"
+OUTPUTS_DIR.mkdir(exist_ok=True)
+
+MAX_SCRIPT_WORDS = 75  # ~30 seconds at normal speaking pace
+EVAL_FEEDBACK_ROUNDS = 1  # Number of revision cycles between Writer and Eval Panel
+NUM_SCRIPT_VARIANTS = 5  # Number of script sets to generate
+NUM_FALLBACKS_PER_SCRIPT = 2  # Fallback CTA variants per script
