@@ -36,7 +36,7 @@ Product Doc + Country + Telco
 
 - **Backend**: Python FastAPI with WebSocket support
 - **Frontend**: Next.js 15 + React 19 + Tailwind CSS
-- **LLM**: Claude (Anthropic) or GPT-4 (OpenAI) -- configurable
+- **LLM**: Azure OpenAI (GPT-5.1-chat) -- reasoning model with extended token support
 - **TTS**: ElevenLabs V3 with audio tags for expressiveness
 
 ## Quick Start
@@ -79,9 +79,11 @@ Visit [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Key | Required | Purpose |
 |-----|----------|---------|
-| `ANTHROPIC_API_KEY` | At least one LLM key | Claude for script generation |
-| `OPENAI_API_KEY` | At least one LLM key | GPT-4 as alternative |
-| `ELEVENLABS_API_KEY` | Yes | Voice synthesis via ElevenLabs V3 |
+| `AZURE_OPENAI_API_KEY` | Yes | Azure OpenAI for all LLM agents |
+| `AZURE_OPENAI_ENDPOINT` | Yes | Your Azure OpenAI resource URL |
+| `AZURE_OPENAI_DEPLOYMENT` | Yes | Deployment name (e.g. `gpt-5.1-chat`) |
+| `AZURE_OPENAI_API_VERSION` | Yes | API version (e.g. `2025-01-01-preview`) |
+| `ELEVENLABS_API_KEY` | Optional | Voice synthesis via ElevenLabs V3 (paid plan recommended for expressive audio) |
 
 ## API Endpoints
 
@@ -91,6 +93,7 @@ Visit [http://localhost:3000](http://localhost:3000) in your browser.
 | `POST` | `/api/generate` | Start pipeline (sync) |
 | `WS` | `/ws/generate` | Start pipeline (WebSocket with live progress) |
 | `GET` | `/api/sessions/{id}` | Get session results |
+| `GET` | `/api/sessions/{id}/scripts` | Download scripts (JSON or text format) |
 | `GET` | `/api/sessions/{id}/audio` | List audio files |
 | `GET` | `/api/audio/{id}/{file}` | Download audio file |
 
@@ -115,6 +118,22 @@ Visit [http://localhost:3000](http://localhost:3000) in your browser.
 6. **Voice Selector**: Queries ElevenLabs for the best voice matching the target market, configures V3 parameters for expressiveness.
 
 7. **Audio Producer**: Generates MP3 files using ElevenLabs V3 TTS with audio tags like `[excited]`, `[whispers]`, `[pause]` for natural delivery.
+
+## Sample Products
+
+The `sample_products/` directory contains product descriptions ready for use:
+
+- **`eva_ai_on_call.txt`** -- EVA AI Personal Assistant (AI On Call) -- an AI-powered IVR/personal call assistant VAS product
+
+To use: Upload the product file in the UI, select your target country and telco, and run the pipeline.
+
+## Team Usage
+
+1. Clone this repo
+2. Copy `.env.example` to `.env` and fill in your API keys
+3. Start backend and frontend (see Quick Start above)
+4. Open `http://localhost:3000` and generate campaigns
+5. Download scripts (JSON/text) and audio files from the results page
 
 ## ElevenLabs V3 Audio Tags
 

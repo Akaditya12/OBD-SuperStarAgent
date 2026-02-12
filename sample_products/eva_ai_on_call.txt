@@ -1,0 +1,71 @@
+PRODUCT NAME: EVA - AI Personal Assistant (AI On Call)
+
+PRODUCT TYPE: AI-powered IVR / Personal Call Assistant (VAS - Value Added Service)
+
+PRODUCT DESCRIPTION:
+EVA is an AI Personal Assistant that answers your phone calls when you are busy, unavailable, or don't want to pick up. EVA talks like a real human -- she greets callers, understands why they are calling, takes messages, schedules meetings by syncing with your Google/Outlook/Apple calendar, and sends you an instant summary of every call via WhatsApp, SMS, or the telco's preferred messaging channel. If the call is urgent, EVA sends a flash message notification immediately. EVA filters out spam calls, robo calls, sales calls, and promotional calls so you never have to deal with them again.
+
+HOW IT WORKS (4 Simple Steps):
+1. SUBSCRIBE: Activate EVA instantly via USSD, SMS, or app. Press 1 to subscribe.
+2. SET UP: Name your EVA and sync your calendar for seamless scheduling.
+3. STAY CONNECTED: EVA answers calls you don't pick up or disconnect. She talks to callers naturally like a human assistant.
+4. GET UPDATES: Receive real-time call summaries via WhatsApp, SMS, or email. Never miss important information.
+
+PRICING:
+- Subscription: $0.30 to $3 per month depending on the market
+- Model: Monthly subscription (auto-renewable)
+- No CAPEX/OPEX cost for the telco operator -- pure revenue share model
+- Commercial model: Revenue share between telco and BlackNGreen
+
+KEY FEATURES:
+- AI that talks like a real human -- not a robotic IVR
+- Answers calls when you're busy, in meetings, driving, or sleeping
+- Filters spam calls, robo calls, and unwanted sales calls automatically
+- Takes messages from callers and delivers summaries instantly
+- Schedules meetings by integrating with Google Calendar, Outlook, and Apple Calendar
+- Sends flash message alerts for urgent calls
+- Call summaries delivered via WhatsApp, SMS, or email
+- Works on any phone (feature phone and smartphone)
+- Personalizable -- name your assistant
+
+UNIQUE SELLING POINTS (USPs):
+- First-ever AI Personal Assistant available at telco scale for mass market
+- Works on feature phones -- no smartphone or internet required
+- Feels like having a real human secretary answering your calls
+- Eliminates spam and unwanted calls completely
+- Never miss an important call or message again
+- Calendar integration for automatic meeting scheduling
+- Instant call summaries so you always know who called and why
+
+VALUE PROPOSITIONS (for the end user):
+- "Never miss an important call again -- EVA handles it for you"
+- "Your own personal secretary for less than the price of a cup of tea per month"
+- "No more spam calls ruining your day"
+- "EVA talks to your callers like a real person -- they won't even know it's AI"
+- "Get instant WhatsApp summaries of every call you miss"
+- "EVA schedules your meetings automatically"
+
+TARGET AUDIENCE:
+- Busy professionals who miss calls during meetings
+- Small business owners who can't afford a real secretary/receptionist
+- Anyone tired of spam calls and robo calls
+- Gig workers, drivers, delivery people who can't pick up while working
+- Students who are in class
+- Anyone who wants to appear professional with a personal assistant
+
+SUBSCRIPTION MECHANISM:
+- DTMF: Press 1 during OBD call to subscribe instantly
+- USSD: Dial short code to activate
+- SMS: Reply with keyword to subscribe
+- Smart Connect / USSD popup when user disconnects a call
+
+TELCO BENEFITS:
+- 5-8% market penetration achievable in 6 months
+- 12% conversion rate from smart promotions
+- Potential revenue: $1.5M to $25M per month depending on telco size
+- No CAPEX/OPEX -- pure revenue share
+- 6-week go-live timeline
+- Increases ARPU and reduces churn
+- First-mover advantage: "Be the first telco to launch AI at scale"
+
+PROVIDER: BlackNGreen (160+ telecom partners, 90+ countries, 290M+ monthly users served)
