@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Star, Clock, Hash } from "lucide-react";
+import { ChevronDown, ChevronUp, Star, Clock, Hash, Download, FileJson, FileText } from "lucide-react";
 import type { Script } from "@/lib/types";
 
 interface ScriptReviewProps {
   scripts: Script[];
   bestVariantId?: number;
+  sessionId?: string;
 }
 
-function highlightAudioTags(text: string) {
+function highlightAudioTags(text: string | undefined | null) {
+  if (!text) return null;
   // Highlight ElevenLabs V3 audio tags
   return text.split(/(\[.*?\])/).map((part, i) => {
     if (part.startsWith("[") && part.endsWith("]")) {
@@ -165,6 +167,25 @@ function ScriptCard({
             </p>
           </div>
 
+          {/* Audio tags used */}
+          {script.audio_tags_used && script.audio_tags_used.length > 0 && (
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-purple-400">
+                Audio Tags Used
+              </span>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {script.audio_tags_used.map((tag, i) => (
+                  <span
+                    key={i}
+                    className="inline-block px-2 py-0.5 rounded text-xs font-mono bg-purple-500/15 text-purple-300 border border-purple-500/20"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Full script */}
           <details className="group">
             <summary className="text-xs text-[var(--muted)] cursor-pointer hover:text-gray-400 transition-colors">
@@ -182,9 +203,46 @@ function ScriptCard({
   );
 }
 
+function triggerDownload(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function downloadScriptsAsJson(scripts: Script[], sessionId: string) {
+  const content = JSON.stringify({ scripts }, null, 2);
+  triggerDownload(`obd_scripts_${sessionId}.json`, content, "application/json");
+}
+
+function downloadScriptsAsText(scripts: Script[], sessionId: string) {
+  const lines: string[] = [];
+  for (const s of scripts) {
+    lines.push("=".repeat(60));
+    lines.push(`VARIANT ${s.variant_id}: ${s.theme}`);
+    lines.push(`Language: ${s.language}  |  Words: ${s.word_count}  |  ~${s.estimated_duration_seconds}s`);
+    lines.push("=".repeat(60));
+    lines.push(`\n--- HOOK (0-5s) ---\n${s.hook}`);
+    lines.push(`\n--- BODY (5-23s) ---\n${s.body}`);
+    lines.push(`\n--- CTA (23-30s) ---\n${s.cta}`);
+    lines.push(`\n--- FULL SCRIPT ---\n${s.full_script}`);
+    lines.push(`\n--- FALLBACK 1 (Urgency) ---\n${s.fallback_1}`);
+    lines.push(`\n--- FALLBACK 2 (Psychology) ---\n${s.fallback_2}`);
+    lines.push(`\n--- POLITE CLOSURE ---\n${s.polite_closure}`);
+    lines.push("");
+  }
+  triggerDownload(`obd_scripts_${sessionId}.txt`, lines.join("\n"), "text/plain");
+}
+
 export default function ScriptReview({
   scripts,
   bestVariantId,
+  sessionId,
 }: ScriptReviewProps) {
   if (!scripts || scripts.length === 0) {
     return (
@@ -196,9 +254,40 @@ export default function ScriptReview({
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
-        Generated Scripts ({scripts.length} variants)
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
+          Generated Scripts ({scripts.length} variants)
+        </h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadScriptsAsJson(scripts, sessionId || "export")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-brand-400 bg-brand-500/10 border border-brand-500/20 hover:bg-brand-500/20 transition-all"
+            title="Download as JSON"
+          >
+            <FileJson className="w-3.5 h-3.5" />
+            JSON
+          </button>
+          <button
+            onClick={() => downloadScriptsAsText(scripts, sessionId || "export")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all"
+            title="Download as Text"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            TXT
+          </button>
+          <button
+            onClick={() => {
+              downloadScriptsAsJson(scripts, sessionId || "export");
+              downloadScriptsAsText(scripts, sessionId || "export");
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--success)] bg-[var(--success)]/10 border border-[var(--success)]/20 hover:bg-[var(--success)]/20 transition-all"
+            title="Download All"
+          >
+            <Download className="w-3.5 h-3.5" />
+            All
+          </button>
+        </div>
+      </div>
       {scripts.map((script) => (
         <ScriptCard
           key={script.variant_id}

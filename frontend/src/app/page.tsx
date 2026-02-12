@@ -8,6 +8,7 @@ import {
   Rocket,
   Sparkles,
   Settings2,
+  Mic2,
 } from "lucide-react";
 import ProductUpload from "@/components/ProductUpload";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
@@ -16,7 +17,8 @@ import PipelineProgress, {
 } from "@/components/PipelineProgress";
 import ScriptReview from "@/components/ScriptReview";
 import AudioPlayer from "@/components/AudioPlayer";
-import type { PipelineResult, WsProgressMessage } from "@/lib/types";
+import VoiceInfoPanel from "@/components/VoiceInfoPanel";
+import type { PipelineResult, VoiceSelection, WsProgressMessage } from "@/lib/types";
 
 // Pipeline step definitions
 const PIPELINE_STEPS: Omit<ProgressStep, "status" | "message">[] = [
@@ -38,7 +40,7 @@ export default function Home() {
   const [country, setCountry] = useState("");
   const [telco, setTelco] = useState("");
   const [language, setLanguage] = useState("");
-  const [provider, setProvider] = useState("anthropic");
+  const [provider, setProvider] = useState("azure_openai");
 
   // Pipeline state
   const [wizardStep, setWizardStep] = useState<WizardStep>("input");
@@ -59,7 +61,7 @@ export default function Home() {
       agent: string,
       status: ProgressStep["status"],
       message: string,
-      data?: Record<string, unknown>
+      wsData?: Record<string, unknown>
     ) => {
       setProgressSteps((prev) => {
         const updated = [...prev];
@@ -75,12 +77,29 @@ export default function Home() {
           }
         }
         if (targetIdx >= 0) {
+          // Extract prompts and data from the WS payload
+          const systemPrompt = wsData?.system_prompt as string | undefined;
+          const userPrompt = wsData?.user_prompt as string | undefined;
+          // data = everything except the prompt fields
+          const agentData = wsData
+            ? Object.fromEntries(
+                Object.entries(wsData).filter(
+                  ([k]) => k !== "system_prompt" && k !== "user_prompt"
+                )
+              )
+            : undefined;
+
           updated[targetIdx] = {
             ...updated[targetIdx],
             status,
             message,
-            // Only attach data on completion (the full output)
-            ...(status === "completed" && data ? { data } : {}),
+            ...(status === "completed" && agentData && Object.keys(agentData).length > 0
+              ? { data: agentData }
+              : {}),
+            ...(status === "completed" && systemPrompt
+              ? { systemPrompt }
+              : {}),
+            ...(status === "completed" && userPrompt ? { userPrompt } : {}),
           };
         }
         return updated;
@@ -122,9 +141,10 @@ export default function Home() {
         const data: WsProgressMessage = JSON.parse(event.data);
         const { agent, status, message } = data;
 
-        if (agent === "Pipeline" && status === "done" && data.result) {
+        if (agent === "Pipeline" && status === "done") {
           // Pipeline completed successfully -- show results
-          setResult(data.result as PipelineResult);
+          const pipelineResult = (data.result || {}) as PipelineResult;
+          setResult(pipelineResult);
           setWizardStep("results");
           return;
         }
@@ -135,6 +155,7 @@ export default function Home() {
           if (data.result) {
             setResult(data.result as PipelineResult);
           }
+          setWizardStep("results");
           return;
         }
 
@@ -176,6 +197,7 @@ export default function Home() {
   const audioFiles = result?.audio?.audio_files || [];
   const sessionId = result?.session_id || "";
   const voiceUsed = result?.audio?.voice_used;
+  const voiceSelection = result?.voice_selection as VoiceSelection | undefined;
 
   return (
     <div className="min-h-screen">
@@ -204,8 +226,7 @@ export default function Home() {
               onChange={(e) => setProvider(e.target.value)}
               className="text-xs px-2 py-1 rounded-lg bg-[var(--card)] border border-[var(--card-border)] text-gray-400 focus:outline-none"
             >
-              <option value="anthropic">Claude (Anthropic)</option>
-              <option value="openai">GPT-4 (OpenAI)</option>
+              <option value="azure_openai">GPT-5.1 (Azure OpenAI)</option>
             </select>
           </div>
         </div>
@@ -343,24 +364,62 @@ export default function Home() {
                 <ScriptReview
                   scripts={scripts}
                   bestVariantId={bestVariantId}
+                  sessionId={sessionId}
                 />
               </div>
 
-              {/* Audio */}
-              <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                <AudioPlayer
-                  sessionId={sessionId}
-                  audioFiles={audioFiles}
-                  voiceInfo={
-                    voiceUsed
-                      ? {
-                          name: voiceUsed.name,
-                          voice_id: voiceUsed.voice_id,
-                          settings: voiceUsed.settings,
-                        }
-                      : undefined
-                  }
-                />
+              {/* Voice Selection & Audio */}
+              <div className="space-y-6">
+                {voiceSelection && (
+                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                    <VoiceInfoPanel voiceSelection={voiceSelection} />
+                  </div>
+                )}
+
+                {audioFiles.length > 0 && (
+                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                    <AudioPlayer
+                      sessionId={sessionId}
+                      audioFiles={audioFiles}
+                      voiceInfo={
+                        voiceUsed
+                          ? {
+                              name: voiceUsed.name,
+                              voice_id: voiceUsed.voice_id,
+                              settings: voiceUsed.settings,
+                            }
+                          : undefined
+                      }
+                    />
+                  </div>
+                )}
+
+                {voiceSelection && audioFiles.length === 0 && (
+                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                    <div className="text-center py-6 space-y-3">
+                      <div className="w-12 h-12 mx-auto rounded-xl bg-[var(--warning)]/15 flex items-center justify-center">
+                        <Mic2 className="w-6 h-6 text-[var(--warning)]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-300">Audio Generation Not Available</p>
+                        <p className="text-xs text-[var(--muted)] mt-1">
+                          Add a valid <code className="px-1.5 py-0.5 rounded bg-[var(--background)] text-brand-400 text-xs">ELEVENLABS_API_KEY</code> to your <code className="px-1.5 py-0.5 rounded bg-[var(--background)] text-brand-400 text-xs">.env</code> file to enable voice recordings.
+                        </p>
+                        <p className="text-xs text-[var(--muted)] mt-2">
+                          The voice parameters above are ready to use with ElevenLabs API directly.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!voiceSelection && audioFiles.length === 0 && (
+                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                    <p className="text-center text-sm text-[var(--muted)] py-4">
+                      Voice selection and audio generation will appear here when enabled.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

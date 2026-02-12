@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  ScrollText,
 } from "lucide-react";
 
 export interface ProgressStep {
@@ -23,6 +24,8 @@ export interface ProgressStep {
   status: "pending" | "started" | "completed" | "error";
   message: string;
   data?: Record<string, unknown>;
+  systemPrompt?: string;
+  userPrompt?: string;
 }
 
 interface PipelineProgressProps {
@@ -138,30 +141,79 @@ function ExpandableString({ text }: { text: string }) {
   );
 }
 
-function AgentOutputPanel({ step }: { step: ProgressStep }) {
-  const [expanded, setExpanded] = useState(false);
-  const data = step.data;
+function AgentDetails({ step }: { step: ProgressStep }) {
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [showOutput, setShowOutput] = useState(false);
 
-  if (!data || Object.keys(data).length === 0) return null;
+  const hasPrompt = !!(step.systemPrompt || step.userPrompt);
+  const hasOutput = !!(step.data && Object.keys(step.data).length > 0);
+
+  if (!hasPrompt && !hasOutput) return null;
 
   return (
-    <div className="mt-2 animate-fade-in">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
-      >
-        <Eye className="w-3 h-3" />
-        <span>View Output</span>
-        {expanded ? (
-          <ChevronDown className="w-3 h-3" />
-        ) : (
-          <ChevronRight className="w-3 h-3" />
+    <div className="mt-2 space-y-2 animate-fade-in">
+      {/* Button row */}
+      <div className="flex items-center gap-4">
+        {hasPrompt && (
+          <button
+            onClick={() => setShowPrompt(!showPrompt)}
+            className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            <ScrollText className="w-3 h-3" />
+            <span>View Prompt</span>
+            {showPrompt ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRight className="w-3 h-3" />
+            )}
+          </button>
         )}
-      </button>
+        {hasOutput && (
+          <button
+            onClick={() => setShowOutput(!showOutput)}
+            className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            <Eye className="w-3 h-3" />
+            <span>View Output</span>
+            {showOutput ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRight className="w-3 h-3" />
+            )}
+          </button>
+        )}
+      </div>
 
-      {expanded && (
-        <div className="mt-2 p-3 rounded-lg bg-[var(--background)] border border-[var(--card-border)] max-h-[400px] overflow-y-auto text-xs animate-slide-up">
-          <JsonValue value={data} />
+      {/* Expanded prompt */}
+      {showPrompt && (
+        <div className="space-y-2 animate-slide-up">
+          {step.systemPrompt && (
+            <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/15 max-h-[350px] overflow-y-auto">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400 block mb-2">
+                System Prompt
+              </span>
+              <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
+                {step.systemPrompt}
+              </pre>
+            </div>
+          )}
+          {step.userPrompt && (
+            <div className="p-3 rounded-lg bg-brand-500/5 border border-brand-500/15 max-h-[350px] overflow-y-auto">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-brand-400 block mb-2">
+                User Prompt
+              </span>
+              <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
+                {step.userPrompt}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Expanded output */}
+      {showOutput && step.data && (
+        <div className="p-3 rounded-lg bg-[var(--background)] border border-[var(--card-border)] max-h-[400px] overflow-y-auto text-xs animate-slide-up">
+          <JsonValue value={step.data} />
         </div>
       )}
     </div>
@@ -240,8 +292,10 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
                     </p>
                   )}
 
-                  {/* Agent output panel */}
-                  {step.status === "completed" && <AgentOutputPanel step={step} />}
+                  {/* Agent prompt & output panels */}
+                  {step.status === "completed" && (
+                    <AgentDetails step={step} />
+                  )}
                 </div>
               </div>
             </div>

@@ -150,9 +150,9 @@ export default function AudioPlayer({
               Voice: {voiceInfo.name}
             </span>
             <div className="flex items-center gap-3 mt-0.5">
-              {Object.entries(voiceInfo.settings).map(([key, val]) => (
+              {voiceInfo.settings && Object.entries(voiceInfo.settings).map(([key, val]) => (
                 <span key={key} className="text-xs text-[var(--muted)]">
-                  {key}: {typeof val === "number" ? val.toFixed(2) : val}
+                  {key}: {typeof val === "number" ? val.toFixed(2) : String(val ?? "")}
                 </span>
               ))}
             </div>

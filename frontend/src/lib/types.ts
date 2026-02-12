@@ -16,6 +16,7 @@ export interface Script {
   full_script: string;
   word_count: number;
   estimated_duration_seconds: number;
+  audio_tags_used?: string[];
 }
 
 export interface ScriptsResult {
@@ -44,6 +45,19 @@ export interface VoiceSettings {
   speed: number;
 }
 
+export interface ElevenLabsApiParams {
+  model_id: string;
+  output_format: string;
+  voice_id: string;
+  voice_settings: {
+    stability: number;
+    similarity_boost: number;
+    style: number;
+    use_speaker_boost: boolean;
+  };
+  sample_api_call: string;
+}
+
 export interface VoiceSelection {
   selected_voice: {
     voice_id: string;
@@ -53,9 +67,17 @@ export interface VoiceSelection {
     gender: string;
     age: string;
     accent: string;
+    preview_url?: string;
   };
   voice_settings: VoiceSettings;
+  elevenlabs_api_params?: ElevenLabsApiParams;
   rationale: string;
+  alternative_voices?: {
+    voice_id: string;
+    name: string;
+    reason: string;
+  }[];
+  audio_production_notes?: string;
 }
 
 export interface AudioFile {
