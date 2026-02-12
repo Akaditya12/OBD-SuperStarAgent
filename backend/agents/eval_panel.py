@@ -85,55 +85,34 @@ EVALUATOR_PERSONAS = [
 ]
 
 SYSTEM_PROMPT = """\
-You are coordinating an evaluation panel of 10 expert evaluators. Each evaluator \
-has a distinct persona and expertise. You must evaluate OBD (Outbound Dialer) \
-promotional scripts from each evaluator's perspective.
+You are an evaluation panel of 10 experts reviewing OBD promotional scripts. \
+The experts are: radio jingle writer, consumer psychologist, behavioral economist, \
+direct response copywriter, brand storyteller, local market expert, persuasion expert, \
+telco marketing director, voice UX designer, and cultural consultant.
 
-For each script variant, every evaluator must provide:
-1. A score from 1-10
-2. Specific strengths (what works well)
-3. Specific weaknesses (what needs improvement)
-4. Concrete suggestions for improvement
+For each script variant, provide a combined evaluation. Then give a consensus.
 
-After all individual evaluations, provide a CONSENSUS summary with:
-- Overall ranking of the script variants (best to worst)
-- Top 3 critical improvements needed across all scripts
-- Specific revision instructions for the script writer
-
-THE EVALUATORS:
-{evaluators}
-
-Output valid JSON with this structure:
+Output valid JSON:
 {{
   "evaluations": [
     {{
       "variant_id": number,
       "scores": [
-        {{
-          "evaluator_id": number,
-          "evaluator_role": "string",
-          "score": number,
-          "strengths": ["list"],
-          "weaknesses": ["list"],
-          "suggestions": ["list"]
-        }}
+        {{"evaluator_id": number, "evaluator_role": "string", "score": number, \
+"strengths": ["list"], "weaknesses": ["list"], "suggestions": ["list"]}}
       ],
       "average_score": number
     }}
   ],
   "consensus": {{
-    "ranking": [list of variant_ids from best to worst],
-    "critical_improvements": ["top 3 improvements needed"],
-    "revision_instructions": "string - detailed instructions for the script writer",
+    "ranking": [variant_ids best to worst],
+    "critical_improvements": ["top 3 improvements"],
+    "revision_instructions": "string",
     "best_variant_id": number,
     "overall_assessment": "string"
   }}
-}}
-""".format(
-    evaluators="\n".join(
-        f"{e['id']}. {e['role']}: {e['expertise']}" for e in EVALUATOR_PERSONAS
-    )
-)
+}}\
+"""
 
 
 class EvalPanelAgent(BaseAgent):
@@ -161,32 +140,26 @@ class EvalPanelAgent(BaseAgent):
         """
         logger.info(f"[{self.name}] Evaluating {len(scripts.get('scripts', []))} script variants")
 
+        # Build a concise context
+        product_name = product_brief.get("product_name", "Unknown")
+        country = market_analysis.get("country", "Unknown")
+        telco = market_analysis.get("telco", "Unknown")
+
         user_prompt = f"""\
-Please evaluate the following OBD promotional scripts from the perspective of \
-ALL 10 evaluators on the panel.
+Evaluate these OBD scripts for {product_name} in {country} ({telco}).
 
---- PRODUCT CONTEXT ---
-{json.dumps(product_brief, indent=2)}
-
---- MARKET CONTEXT ---
-{json.dumps(market_analysis, indent=2)}
-
---- SCRIPTS TO EVALUATE ---
+SCRIPTS:
 {json.dumps(scripts, indent=2)}
 
-Each evaluator must independently score and critique every script variant. \
-Then provide a consensus summary with ranking and revision instructions.
-
-Be rigorous and specific. The goal is to produce the most effective OBD scripts \
-possible for this market.
-
-Output only valid JSON.\
+Score each variant (1-10) from each evaluator's perspective. \
+Provide consensus with ranking, top 3 improvements, and revision instructions. \
+Output valid JSON.\
 """
 
         response = await self.call_llm(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            max_tokens=8192,
+            max_tokens=32768,
         )
 
         result = self.parse_json(response)

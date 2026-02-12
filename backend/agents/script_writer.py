@@ -14,93 +14,123 @@ from .base import BaseAgent
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are the most acclaimed copywriter in the target country. You deeply understand \
-the local culture, language nuances, psychology of the people, and what makes them \
-engage with voice-based promotions.
+You are an expert OBD (Outbound Dialer) copywriter who creates promotional voice scripts \
+for telecom markets. You understand local culture, psychology, and persuasion.
 
-Your expertise spans:
-- Direct response copywriting
-- Radio jingle and voice-over scripting
-- Behavioral psychology and persuasion techniques
-- Cultural sensitivity and local idiom usage
-- Dark psychology selling techniques (scarcity, loss aversion, social proof, FOMO)
+Create OBD scripts with ElevenLabs V3 audio tags embedded in the text.
 
-YOUR TASK: Create outbound dialer (OBD) promotional scripts.
+SCRIPT STRUCTURE (each variant):
+- hook: First 5 seconds, grab attention immediately. Use [excited], [curious], cultural refs.
+- body: Next 15-18 seconds, deliver the product pitch compellingly. Benefits, not features.
+- cta: Last 5-7 seconds, clear DTMF call to action (e.g. "Press 1 now").
+- fallback_1: If no DTMF pressed, urgency follow-up (~15 words).
+- fallback_2: If still no DTMF, psychological persuasion (~15 words).
+- polite_closure: Graceful exit (~10 words).
+- full_script: hook + body + cta combined into one string.
 
-STRUCTURE OF EACH SCRIPT SET:
-1. **HOOK** (first 5 seconds / ~12-15 words): The most critical part. Must IMMEDIATELY \
-   grab attention and prevent the customer from disconnecting. Use cultural references, \
-   current affairs, curiosity gaps, or emotional triggers.
+AUDIO TAGS (use 3-5 per script): [excited], [curious], [whispers], [laughs], [pause], \
+[short pause], [cheerfully], [mischievously], [playfully], [sigh], [gasps]. \
+Also use CAPITALIZATION for emphasis and ellipses (...) for dramatic pauses.
 
-2. **BODY** (next 15-18 seconds / ~35-45 words): Deliver the product pitch compellingly. \
-   The customer must WANT to subscribe after hearing this. Focus on benefits, not features.
+RULES:
+- Total script (hook+body+cta) MUST be under {max_words} words (~30 seconds)
+- Use the local language mixed with English where appropriate
+- DTMF instruction must be crystal clear
+- Each variant must have a DIFFERENT creative angle
 
-3. **CTA** (last 5-7 seconds / ~12-15 words): Clear DTMF-based call to action. \
-   Tell the customer exactly what button to press and what they get.
+OUTPUT: Valid JSON:
+{{"scripts": [{{"variant_id": 1, "theme": "string", "language": "string", \
+"hook": "string", "body": "string", "cta": "string", "fallback_1": "string", \
+"fallback_2": "string", "polite_closure": "string", "full_script": "string", \
+"word_count": 0, "estimated_duration_seconds": 0, \
+"audio_tags_used": ["list"]}}], \
+"language_used": "string", "creative_rationale": "string"}}
 
-4. **FALLBACK 1** (if no DTMF pressed): Urgency-based follow-up. Create time pressure \
-   or scarcity. "This offer expires..." / "Only X spots left..."
+Generate exactly {num_variants} variants.\
+""".format(max_words=MAX_SCRIPT_WORDS, num_variants=NUM_SCRIPT_VARIANTS)
 
-5. **FALLBACK 2** (if still no DTMF): Maximum persuasion attempt using psychological \
-   techniques -- loss aversion, social proof, fear of missing out. Make it powerful.
-
-6. **POLITE CLOSURE** (if still no response): Graceful exit that leaves the door open.
-
-CRITICAL RULES:
-- Total script (hook + body + CTA) must be UNDER {max_words} words (~30 seconds)
-- Each fallback must be under 20 words (~8 seconds)
-- Write in the recommended language for the target market
-- Include ElevenLabs V3 audio tags for expressiveness:
-  * [excited], [whispers], [curious], [laughs], [sigh], [pause]
-  * Use CAPITALIZATION for emphasis on key words
-  * Use ellipses (...) for dramatic pauses
-  * Use [short pause] or [long pause] for timed breaks
-- The script must feel like a REAL person talking, not a robot reading
-- Use local idioms, proverbs, or cultural references where appropriate
-- DTMF instruction must be crystal clear (e.g., "Press 1 now")
-
-OUTPUT FORMAT: Valid JSON with this structure:
-{{
-  "scripts": [
-    {{
-      "variant_id": 1,
-      "theme": "string - brief description of the creative angle",
-      "language": "string - language code and name",
-      "hook": "string - the hook text with audio tags",
-      "body": "string - the body text with audio tags",
-      "cta": "string - the CTA text with audio tags",
-      "fallback_1": "string - urgency-based follow-up with audio tags",
-      "fallback_2": "string - psychological persuasion attempt with audio tags",
-      "polite_closure": "string - graceful exit with audio tags",
-      "full_script": "string - hook + body + CTA combined as one flowing script",
-      "word_count": number,
-      "estimated_duration_seconds": number
-    }}
-  ],
-  "language_used": "string",
-  "creative_rationale": "string - why these angles were chosen"
-}}
-
-Generate exactly {num_variants} script variants, each with a DIFFERENT creative angle.\
-""".format(
-    max_words=MAX_SCRIPT_WORDS,
-    num_variants=NUM_SCRIPT_VARIANTS,
-)
 
 REVISION_SYSTEM_PROMPT = """\
-You are the same expert copywriter. You have received feedback from an evaluation \
-panel on your OBD scripts. Revise the scripts based on the feedback while maintaining \
-the same JSON output format.
-
-Apply all suggested improvements. If feedback conflicts, use your expert judgment \
-to find the best balance. Keep the same structure and rules as before:
-- Under {max_words} words per script
-- ElevenLabs V3 audio tags included
-- Culturally relevant and compelling
-- Clear DTMF-based CTAs
-
-Output the revised scripts in the exact same JSON format.\
+You are an expert OBD copywriter revising scripts based on evaluation feedback. \
+Apply improvements while keeping the same JSON output format. \
+Rules: under {max_words} words per script, include ElevenLabs V3 audio tags, \
+culturally relevant, clear DTMF CTAs.\
 """.format(max_words=MAX_SCRIPT_WORDS)
+
+
+def _summarize_brief(product_brief: dict[str, Any]) -> str:
+    """Create a concise text summary of the product brief for the prompt."""
+    parts = []
+    parts.append(f"Product: {product_brief.get('product_name', 'Unknown')}")
+    parts.append(f"Type: {product_brief.get('product_type', 'VAS')}")
+    desc = product_brief.get("description", "")
+    if desc:
+        parts.append(f"Description: {desc}")
+    features = product_brief.get("key_features", [])
+    if features:
+        parts.append(f"Key features: {', '.join(features[:5])}")
+    pricing = product_brief.get("pricing", {})
+    if pricing:
+        points = pricing.get("price_points", [])
+        if points:
+            parts.append(f"Pricing: {'; '.join(str(p) for p in points[:3])}")
+        elif pricing.get("model"):
+            parts.append(f"Pricing model: {pricing['model']}")
+    usps = product_brief.get("unique_selling_points", [])
+    if usps:
+        parts.append(f"USPs: {', '.join(usps[:4])}")
+    sub = product_brief.get("subscription_mechanism", "")
+    if sub:
+        parts.append(f"Subscribe via: {sub}")
+    return "\n".join(parts)
+
+
+def _summarize_market(market_analysis: dict[str, Any]) -> str:
+    """Create a concise text summary of market analysis for the prompt."""
+    parts = []
+    parts.append(f"Country: {market_analysis.get('country', '?')}")
+    parts.append(f"Telco: {market_analysis.get('telco', '?')}")
+    overview = market_analysis.get("market_overview", {})
+    if overview:
+        lang = overview.get("dominant_language_for_promotions", "")
+        if lang:
+            parts.append(f"Language for promotions: {lang}")
+        langs = overview.get("primary_languages", [])
+        if langs:
+            parts.append(f"Languages spoken: {', '.join(langs[:3])}")
+    culture = market_analysis.get("cultural_insights", {})
+    if culture:
+        style = culture.get("communication_style", "")
+        if style:
+            parts.append(f"Communication style: {style}")
+        humor = culture.get("humor_style", "")
+        if humor:
+            parts.append(f"Humor style: {humor}")
+        refs = culture.get("local_references_to_use", [])
+        if not refs:
+            refs = market_analysis.get("promotion_recommendations", {}).get("local_references_to_use", [])
+        if refs:
+            parts.append(f"Local references: {', '.join(refs[:3])}")
+    promo = market_analysis.get("promotion_recommendations", {})
+    if promo:
+        tone = promo.get("recommended_tone", "")
+        if tone:
+            parts.append(f"Recommended tone: {tone}")
+        triggers = promo.get("key_emotional_triggers", [])
+        if triggers:
+            parts.append(f"Emotional triggers: {', '.join(triggers[:4])}")
+        urgency = promo.get("urgency_tactics", [])
+        if urgency:
+            parts.append(f"Urgency tactics: {', '.join(urgency[:3])}")
+    audience = market_analysis.get("target_audience_psyche", {})
+    if audience:
+        segment = audience.get("primary_segment", "")
+        if segment:
+            parts.append(f"Target segment: {segment}")
+        pains = audience.get("pain_points", [])
+        if pains:
+            parts.append(f"Pain points: {', '.join(pains[:3])}")
+    return "\n".join(parts)
 
 
 class ScriptWriterAgent(BaseAgent):
@@ -117,19 +147,7 @@ class ScriptWriterAgent(BaseAgent):
         previous_scripts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Generate or revise OBD scripts.
-
-        Args:
-            product_brief: Structured product brief from Agent 1.
-            market_analysis: Market analysis from Agent 2.
-            feedback: Optional evaluation feedback for revision.
-            previous_scripts: Optional previous scripts to revise.
-
-        Returns:
-            Script sets with hook, body, CTA, and fallbacks.
-        """
         is_revision = feedback is not None and previous_scripts is not None
-
         if is_revision:
             logger.info(f"[{self.name}] Revising scripts based on evaluation feedback")
             return await self._revise(product_brief, market_analysis, feedback, previous_scripts)
@@ -143,32 +161,31 @@ class ScriptWriterAgent(BaseAgent):
         market_analysis: dict[str, Any],
     ) -> dict[str, Any]:
         """Generate fresh scripts."""
+        brief_summary = _summarize_brief(product_brief)
+        market_summary = _summarize_market(market_analysis)
+
         user_prompt = f"""\
-Create {NUM_SCRIPT_VARIANTS} OBD promotional script variants for the following:
+Create {NUM_SCRIPT_VARIANTS} OBD promotional script variants.
 
---- PRODUCT BRIEF ---
-{json.dumps(product_brief, indent=2)}
+PRODUCT:
+{brief_summary}
 
---- MARKET ANALYSIS ---
-{json.dumps(market_analysis, indent=2)}
+MARKET:
+{market_summary}
 
-Each variant should use a DIFFERENT creative angle (e.g., humor, urgency, \
-storytelling, social proof, curiosity gap). Make each hook unique and compelling.
-
-Remember: Include ElevenLabs V3 audio tags like [excited], [whispers], [curious], \
-[pause], [laughs], [sigh] throughout the scripts. Use CAPS for emphasis and \
-ellipses for dramatic pauses.
-
-Output only valid JSON.\
+Each variant needs a DIFFERENT creative angle (e.g., curiosity gap, humor, urgency, \
+storytelling, social proof). Embed ElevenLabs V3 audio tags in every field. \
+Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" array.\
 """
 
         response = await self.call_llm(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            max_tokens=8192,
+            max_tokens=32768,
         )
 
-        result = self.parse_json(response)
+        logger.info(f"[{self.name}] Raw response (first 500 chars): {response[:500]}")
+        result = self._normalize_result(response)
         self._validate_scripts(result)
         return result
 
@@ -180,33 +197,70 @@ Output only valid JSON.\
         previous_scripts: dict[str, Any],
     ) -> dict[str, Any]:
         """Revise scripts based on evaluation feedback."""
+        # Extract just the consensus feedback, not the full evaluation
+        consensus = feedback.get("consensus", {})
+        improvements = consensus.get("critical_improvements", [])
+        instructions = consensus.get("revision_instructions", "")
+
+        feedback_text = ""
+        if improvements:
+            feedback_text += "Critical improvements needed:\n" + "\n".join(f"- {imp}" for imp in improvements)
+        if instructions:
+            feedback_text += f"\n\nRevision instructions: {instructions}"
+        if not feedback_text:
+            feedback_text = json.dumps(feedback, indent=2)[:2000]
+
         user_prompt = f"""\
-Please revise the following OBD scripts based on the evaluation panel's feedback.
+Revise these OBD scripts based on evaluation feedback.
 
---- PRODUCT BRIEF ---
-{json.dumps(product_brief, indent=2)}
-
---- MARKET ANALYSIS ---
-{json.dumps(market_analysis, indent=2)}
-
---- CURRENT SCRIPTS ---
+CURRENT SCRIPTS:
 {json.dumps(previous_scripts, indent=2)}
 
---- EVALUATION FEEDBACK ---
-{json.dumps(feedback, indent=2)}
+FEEDBACK:
+{feedback_text}
 
-Apply all improvements suggested by the evaluators. Maintain the same JSON format.
-Output only valid JSON.\
+Apply improvements. Keep same JSON format with "scripts" array. \
+Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON.\
 """
 
         response = await self.call_llm(
             system_prompt=REVISION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            max_tokens=8192,
+            max_tokens=32768,
         )
 
-        result = self.parse_json(response)
+        logger.info(f"[{self.name}] Raw revision response (first 500 chars): {response[:500]}")
+        result = self._normalize_result(response)
         self._validate_scripts(result)
+        return result
+
+    def _normalize_result(self, response: str) -> dict[str, Any]:
+        """Parse and normalize the LLM response into expected format."""
+        result = self.parse_json(response)
+
+        # Handle alternative key names
+        if "scripts" not in result and "variants" in result:
+            result["scripts"] = result.pop("variants")
+
+        # Handle single script returned as top-level object
+        if "scripts" not in result and "hook" in result and "body" in result:
+            result = {
+                "scripts": [result],
+                "language_used": result.get("language", ""),
+                "creative_rationale": "Single variant returned",
+            }
+
+        if "scripts" not in result:
+            logger.warning(f"[{self.name}] Unexpected response structure. Keys: {list(result.keys())}")
+            result["scripts"] = []
+
+        # Ensure each script has required fields
+        for i, script in enumerate(result.get("scripts", [])):
+            if "variant_id" not in script:
+                script["variant_id"] = i + 1
+            if "full_script" not in script and "hook" in script:
+                script["full_script"] = f"{script.get('hook', '')} {script.get('body', '')} {script.get('cta', '')}"
+
         return result
 
     def _validate_scripts(self, result: dict[str, Any]) -> None:
@@ -220,7 +274,7 @@ Output only valid JSON.\
             script["word_count"] = word_count
             script["estimated_duration_seconds"] = round(word_count / 2.5, 1)
 
-            if word_count > MAX_SCRIPT_WORDS + 10:  # Small buffer
+            if word_count > MAX_SCRIPT_WORDS + 10:
                 logger.warning(
                     f"[{self.name}] Script variant {script.get('variant_id')} "
                     f"exceeds word limit: {word_count} words"

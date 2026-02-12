@@ -7,3 +7,4 @@ pydantic>=2.10.0
 python-dotenv>=1.0.1
 aiofiles>=24.1.0
 httpx>=0.28.0
+eval_type_backport>=0.2.0

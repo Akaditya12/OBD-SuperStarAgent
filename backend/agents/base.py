@@ -33,6 +33,9 @@ class BaseAgent(ABC):
     def __init__(self, provider: str | None = None):
         self.provider = provider or DEFAULT_LLM_PROVIDER
         self._client: AsyncAzureOpenAI | None = None
+        # Store the last prompts used for UI visibility
+        self.last_system_prompt: str = ""
+        self.last_user_prompt: str = ""
 
     @property
     def client(self) -> AsyncAzureOpenAI:
@@ -48,11 +51,18 @@ class BaseAgent(ABC):
         self,
         system_prompt: str,
         user_prompt: str,
-        max_tokens: int = 4096,
+        max_tokens: int = 16384,
         json_output: bool = True,
     ) -> str:
-        """Call Azure OpenAI and return the response text."""
-        logger.info(f"[{self.name}] Calling Azure OpenAI ({AZURE_OPENAI_DEPLOYMENT})")
+        """Call Azure OpenAI and return the response text.
+
+        Note: GPT-5.1 is a reasoning model. max_completion_tokens includes
+        both reasoning (thinking) tokens AND output tokens. We default to
+        16384 to leave plenty of room for both reasoning and a full response.
+        """
+        self.last_system_prompt = system_prompt
+        self.last_user_prompt = user_prompt
+        logger.info(f"[{self.name}] Calling Azure OpenAI ({AZURE_OPENAI_DEPLOYMENT}) max_tokens={max_tokens}")
 
         kwargs: dict[str, Any] = {}
         if json_output:
@@ -67,8 +77,31 @@ class BaseAgent(ABC):
             ],
             **kwargs,
         )
-        text = response.choices[0].message.content or ""
+
+        # Log token usage and finish reason for debugging
+        choice = response.choices[0]
+        finish_reason = choice.finish_reason
+        usage = response.usage
+        if usage:
+            reasoning_tokens = 0
+            if usage.completion_tokens_details:
+                reasoning_tokens = getattr(usage.completion_tokens_details, "reasoning_tokens", 0) or 0
+            logger.info(
+                f"[{self.name}] Tokens -- prompt: {usage.prompt_tokens}, "
+                f"completion: {usage.completion_tokens}, "
+                f"reasoning: {reasoning_tokens}, "
+                f"finish: {finish_reason}"
+            )
+
+        text = choice.message.content or ""
         logger.info(f"[{self.name}] Azure OpenAI response: {len(text)} chars")
+
+        if finish_reason == "length":
+            logger.warning(
+                f"[{self.name}] Response was TRUNCATED (finish_reason=length). "
+                f"Consider increasing max_tokens (currently {max_tokens})."
+            )
+
         return text
 
     def parse_json(self, text: str) -> dict[str, Any]:

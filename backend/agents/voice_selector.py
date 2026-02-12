@@ -42,6 +42,11 @@ ElevenLabs V3 Voice Settings:
 - style: 0.0 to 1.0 (style exaggeration, higher = more expressive)
 - speed: 0.7 to 1.2 (speech speed, 1.0 = normal)
 
+ElevenLabs V3 Model IDs:
+- "eleven_v3" -- latest V3 model, best for expressive speech with audio tags
+- "eleven_multilingual_v2" -- good multilingual support
+- "eleven_turbo_v2_5" -- faster, good quality
+
 Output valid JSON:
 {
   "selected_voice": {
@@ -51,13 +56,26 @@ Output valid JSON:
     "language": "string",
     "gender": "string",
     "age": "string",
-    "accent": "string"
+    "accent": "string",
+    "preview_url": "string - URL to preview this voice (if available)"
   },
   "voice_settings": {
     "stability": number,
     "similarity_boost": number,
     "style": number,
     "speed": number
+  },
+  "elevenlabs_api_params": {
+    "model_id": "string - recommended ElevenLabs model ID (e.g. eleven_v3)",
+    "output_format": "mp3_44100_128",
+    "voice_id": "string - same as selected_voice.voice_id",
+    "voice_settings": {
+      "stability": number,
+      "similarity_boost": number,
+      "style": number,
+      "use_speaker_boost": true
+    },
+    "sample_api_call": "string - example curl command to call ElevenLabs TTS with these params"
   },
   "rationale": "string - why this voice was selected",
   "alternative_voices": [
@@ -67,7 +85,7 @@ Output valid JSON:
       "reason": "string - why this is a good alternative"
     }
   ],
-  "audio_production_notes": "string - tips for best results with this voice"
+  "audio_production_notes": "string - tips for best results with this voice and these scripts"
 }\
 """
 
