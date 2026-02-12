@@ -7,12 +7,14 @@ import uuid
 from typing import Any, Callable, Awaitable
 
 from backend.agents import (
+    AudioProducerAgent,
     EvalPanelAgent,
     MarketResearcherAgent,
     ProductAnalyzerAgent,
     ScriptWriterAgent,
+    VoiceSelectorAgent,
 )
-from backend.config import EVAL_FEEDBACK_ROUNDS
+from backend.config import ELEVENLABS_API_KEY, EVAL_FEEDBACK_ROUNDS
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +49,13 @@ class PipelineOrchestrator:
         self.provider = provider
         self.on_progress = on_progress or _noop_callback
 
-        # Initialize agents (scripts-only pipeline)
+        # Initialize agents
         self.product_analyzer = ProductAnalyzerAgent(provider=provider)
         self.market_researcher = MarketResearcherAgent(provider=provider)
         self.script_writer = ScriptWriterAgent(provider=provider)
         self.eval_panel = EvalPanelAgent(provider=provider)
+        self.voice_selector = VoiceSelectorAgent(provider=provider)
+        self.audio_producer = AudioProducerAgent(provider=provider)
 
     async def run(
         self,
@@ -93,6 +97,8 @@ class PipelineOrchestrator:
             await self.on_progress("ProductAnalyzer", "completed", {
                 "message": f"Product analyzed: {product_brief.get('product_name', 'Unknown')}",
                 "data": product_brief,
+                "system_prompt": self.product_analyzer.last_system_prompt,
+                "user_prompt": self.product_analyzer.last_user_prompt,
             })
 
             # ── Step 2: Market Research ──
@@ -108,6 +114,8 @@ class PipelineOrchestrator:
             await self.on_progress("MarketResearcher", "completed", {
                 "message": "Market analysis complete",
                 "data": market_analysis,
+                "system_prompt": self.market_researcher.last_system_prompt,
+                "user_prompt": self.market_researcher.last_user_prompt,
             })
 
             # ── Step 3: Script Generation ──
@@ -122,6 +130,8 @@ class PipelineOrchestrator:
             await self.on_progress("ScriptWriter", "completed", {
                 "message": f"Generated {len(scripts.get('scripts', []))} script variants",
                 "data": scripts,
+                "system_prompt": self.script_writer.last_system_prompt,
+                "user_prompt": self.script_writer.last_user_prompt,
             })
 
             # ── Step 4 & 5: Evaluation + Revision Loop ──
@@ -142,6 +152,8 @@ class PipelineOrchestrator:
                 await self.on_progress("EvalPanel", "completed", {
                     "message": f"Evaluation complete {round_label}",
                     "data": evaluation,
+                    "system_prompt": self.eval_panel.last_system_prompt,
+                    "user_prompt": self.eval_panel.last_user_prompt,
                 })
 
                 # Revise
@@ -158,21 +170,61 @@ class PipelineOrchestrator:
                 await self.on_progress("ScriptWriter", "completed", {
                     "message": f"Scripts revised {round_label}",
                     "data": final_scripts,
+                    "system_prompt": self.script_writer.last_system_prompt,
+                    "user_prompt": self.script_writer.last_user_prompt,
                 })
 
             results["final_scripts"] = final_scripts
 
-            # ── Voice Selection & Audio skipped for now ──
+            # ── Step 6: Voice Selection ──
+            await self.on_progress("VoiceSelector", "started", {
+                "message": "Selecting optimal ElevenLabs voice and parameters..."
+            })
+            voice_selection = await self.voice_selector.run(
+                scripts=final_scripts,
+                market_analysis=market_analysis,
+                country=country,
+                language=language,
+            )
+            results["voice_selection"] = voice_selection
             await self.on_progress("VoiceSelector", "completed", {
-                "message": "Skipped (audio generation disabled)",
+                "message": f"Voice selected: {voice_selection.get('selected_voice', {}).get('name', 'Unknown')}",
+                "data": voice_selection,
+                "system_prompt": self.voice_selector.last_system_prompt,
+                "user_prompt": self.voice_selector.last_user_prompt,
             })
-            await self.on_progress("AudioProducer", "completed", {
-                "message": "Skipped (audio generation disabled)",
-            })
+
+            # ── Step 7: Audio Production ──
+            has_elevenlabs_key = bool(ELEVENLABS_API_KEY and not ELEVENLABS_API_KEY.startswith("sk-dummy"))
+            if has_elevenlabs_key:
+                await self.on_progress("AudioProducer", "started", {
+                    "message": "Generating audio recordings via ElevenLabs V3..."
+                })
+                try:
+                    audio_result = await self.audio_producer.run(
+                        scripts=final_scripts,
+                        voice_selection=voice_selection,
+                        session_id=session_id,
+                    )
+                    results["audio"] = audio_result
+                    successful = audio_result.get("summary", {}).get("total_generated", 0)
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": f"Generated {successful} audio recordings",
+                        "data": {"summary": audio_result.get("summary", {})},
+                    })
+                except Exception as audio_err:
+                    logger.error(f"Audio production failed: {audio_err}")
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": f"Audio generation failed: {str(audio_err)}. Scripts are still available.",
+                    })
+            else:
+                await self.on_progress("AudioProducer", "completed", {
+                    "message": "Skipped -- add a valid ELEVENLABS_API_KEY to .env to enable audio generation",
+                })
 
             # ── Pipeline Complete ──
             await self.on_progress("Pipeline", "completed", {
-                "message": "Pipeline complete! Scripts are ready for review.",
+                "message": "Pipeline complete! Scripts and voice recommendation are ready.",
                 "session_id": session_id,
             })
 

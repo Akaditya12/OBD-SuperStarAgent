@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,7 +56,7 @@ async def health_check():
 
 @app.post("/api/generate")
 async def generate_scripts(
-    product_file: UploadFile | None = File(None),
+    product_file: Optional[UploadFile] = File(None),
     product_text: str = Form(""),
     country: str = Form(...),
     telco: str = Form(...),
@@ -130,6 +130,49 @@ async def download_audio(session_id: str, filename: str):
         path=str(file_path),
         media_type="audio/mpeg",
         filename=filename,
+    )
+
+
+@app.get("/api/sessions/{session_id}/scripts")
+async def download_scripts(session_id: str, fmt: str = "json"):
+    """Download scripts for a session as JSON or plain text."""
+    if session_id not in sessions:
+        return JSONResponse(status_code=404, content={"error": "Session not found"})
+
+    result = sessions[session_id]
+    final_scripts = result.get("final_scripts", result.get("revised_scripts_round_1", result.get("initial_scripts", {})))
+    scripts = final_scripts.get("scripts", [])
+
+    if not scripts:
+        return JSONResponse(status_code=404, content={"error": "No scripts found in session"})
+
+    if fmt == "text":
+        # Plain text format for easy reading / copy-paste
+        lines = []
+        for s in scripts:
+            lines.append(f"{'='*60}")
+            lines.append(f"VARIANT {s.get('variant_id', '?')}: {s.get('theme', '')}")
+            lines.append(f"Language: {s.get('language', 'N/A')}  |  Words: {s.get('word_count', '?')}  |  ~{s.get('estimated_duration_seconds', '?')}s")
+            lines.append(f"{'='*60}")
+            lines.append(f"\n--- HOOK (0-5s) ---\n{s.get('hook', '')}")
+            lines.append(f"\n--- BODY (5-23s) ---\n{s.get('body', '')}")
+            lines.append(f"\n--- CTA (23-30s) ---\n{s.get('cta', '')}")
+            lines.append(f"\n--- FULL SCRIPT ---\n{s.get('full_script', '')}")
+            lines.append(f"\n--- FALLBACK 1 (Urgency) ---\n{s.get('fallback_1', '')}")
+            lines.append(f"\n--- FALLBACK 2 (Psychology) ---\n{s.get('fallback_2', '')}")
+            lines.append(f"\n--- POLITE CLOSURE ---\n{s.get('polite_closure', '')}")
+            lines.append("")
+        text_content = "\n".join(lines)
+        return JSONResponse(
+            content={"filename": f"scripts_{session_id}.txt", "content": text_content},
+        )
+
+    # Default: JSON
+    return JSONResponse(
+        content={
+            "filename": f"scripts_{session_id}.json",
+            "content": json.dumps(final_scripts, indent=2),
+        },
     )
 
 
