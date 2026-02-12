@@ -48,21 +48,29 @@ class AudioProducerAgent(BaseAgent):
         """
         url = f"{ELEVENLABS_BASE_URL}/v1/text-to-speech/{voice_id}"
 
+        # ElevenLabs V3 (eleven_v3) on free plans only accepts stability
+        # values of 0.0, 0.5, or 1.0. Snap to nearest valid value.
+        def snap_stability(val: float) -> float:
+            valid = [0.0, 0.5, 1.0]
+            return min(valid, key=lambda x: abs(x - val))
+
+        raw_stability = voice_settings.get("stability", 0.5)
+        snapped_stability = snap_stability(raw_stability)
+
         payload = {
             "text": text,
             "model_id": ELEVENLABS_TTS_MODEL,
             "voice_settings": {
-                "stability": voice_settings.get("stability", 0.4),
+                "stability": snapped_stability,
                 "similarity_boost": voice_settings.get("similarity_boost", 0.75),
-                "style": voice_settings.get("style", 0.6),
-                "use_speaker_boost": True,
             },
         }
 
-        # Add speed if specified and supported
-        speed = voice_settings.get("speed")
-        if speed and speed != 1.0:
-            payload["voice_settings"]["speed"] = speed
+        logger.info(
+            f"[{self.name}] TTS params: model={ELEVENLABS_TTS_MODEL}, "
+            f"stability={snapped_stability} (raw={raw_stability}), "
+            f"similarity_boost={payload['voice_settings']['similarity_boost']}"
+        )
 
         headers = {
             "xi-api-key": ELEVENLABS_API_KEY,
@@ -80,7 +88,12 @@ class AudioProducerAgent(BaseAgent):
                 params=params,
                 timeout=60.0,
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                error_body = response.text[:500]
+                logger.error(
+                    f"[{self.name}] ElevenLabs TTS error {response.status_code}: {error_body}"
+                )
+                response.raise_for_status()
 
             # Save the audio file
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +113,37 @@ class AudioProducerAgent(BaseAgent):
             "model": ELEVENLABS_TTS_MODEL,
         }
 
+    async def _validate_voice_id(self, voice_id: str) -> str:
+        """Validate voice_id exists in ElevenLabs. Return a valid ID or fallback."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{ELEVENLABS_BASE_URL}/v2/voices",
+                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    params={"page_size": 100},
+                    timeout=15.0,
+                )
+                response.raise_for_status()
+                voices = response.json().get("voices", [])
+                valid_ids = {v["voice_id"] for v in voices}
+
+                if voice_id in valid_ids:
+                    return voice_id
+
+                logger.warning(
+                    f"[{self.name}] Voice ID '{voice_id}' not found in account. "
+                    f"Available: {[v['name'] + '=' + v['voice_id'] for v in voices[:5]]}"
+                )
+                # Fall back to first available voice
+                if voices:
+                    fallback = voices[0]
+                    logger.info(f"[{self.name}] Falling back to voice: {fallback['name']} ({fallback['voice_id']})")
+                    return fallback["voice_id"]
+        except Exception as e:
+            logger.error(f"[{self.name}] Failed to validate voice: {e}")
+
+        return voice_id  # Return original if validation fails entirely
+
     async def run(
         self,
         scripts: dict[str, Any],
@@ -118,8 +162,11 @@ class AudioProducerAgent(BaseAgent):
             Audio generation results with file paths and metadata.
         """
         voice_id = voice_selection["selected_voice"]["voice_id"]
-        voice_settings = voice_selection["voice_settings"]
+        voice_settings = voice_selection.get("voice_settings", {})
         voice_name = voice_selection["selected_voice"].get("name", "Unknown")
+
+        # Validate the voice ID actually exists in the ElevenLabs account
+        voice_id = await self._validate_voice_id(voice_id)
 
         session_id = session_id or str(uuid.uuid4())[:8]
         session_dir = OUTPUTS_DIR / session_id
