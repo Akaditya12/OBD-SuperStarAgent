@@ -1,0 +1,17 @@
+# Local testing of the production Docker setup
+# Usage: docker compose up --build
+version: "3.8"
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - BACKEND_URL=http://localhost:8000
+    volumes:
+      - ./backend/outputs:/app/backend/outputs
