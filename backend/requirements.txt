@@ -8,3 +8,4 @@ python-dotenv>=1.0.1
 aiofiles>=24.1.0
 httpx>=0.28.0
 eval_type_backport>=0.2.0
+pyjwt>=2.8.0

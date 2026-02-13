@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Zap,
   ArrowRight,
@@ -9,6 +10,8 @@ import {
   Sparkles,
   Settings2,
   Mic2,
+  LogOut,
+  Loader2,
 } from "lucide-react";
 import ProductUpload from "@/components/ProductUpload";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
@@ -34,6 +37,35 @@ const PIPELINE_STEPS: Omit<ProgressStep, "status" | "message">[] = [
 type WizardStep = "input" | "running" | "results";
 
 export default function Home() {
+  const router = useRouter();
+
+  // Auth state
+  const [authChecked, setAuthChecked] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
+
+  // Check auth on mount
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated) {
+          setUsername(data.username || "user");
+          setAuthChecked(true);
+        } else {
+          router.push("/login");
+        }
+      })
+      .catch(() => {
+        // Backend not reachable or auth not enabled -- allow access (local dev)
+        setAuthChecked(true);
+      });
+  }, [router]);
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  };
+
   // Form state
   const [productText, setProductText] = useState("");
   const [fileName, setFileName] = useState("");
@@ -117,9 +149,9 @@ export default function Home() {
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
 
-    // Determine WebSocket URL
+    // Determine WebSocket URL -- use same host as the page (works via rewrite proxy)
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/ws/generate`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/generate`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -199,6 +231,15 @@ export default function Home() {
   const voiceUsed = result?.audio?.voice_used;
   const voiceSelection = result?.voice_selection as VoiceSelection | undefined;
 
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       {/* Header */}
@@ -218,16 +259,31 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Provider selector */}
-          <div className="flex items-center gap-2">
-            <Settings2 className="w-4 h-4 text-gray-500" />
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="text-xs px-2 py-1 rounded-lg bg-[var(--card)] border border-[var(--card-border)] text-gray-400 focus:outline-none"
-            >
-              <option value="azure_openai">GPT-5.1 (Azure OpenAI)</option>
-            </select>
+          {/* Provider selector + User menu */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-gray-500" />
+              <select
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                className="text-xs px-2 py-1 rounded-lg bg-[var(--card)] border border-[var(--card-border)] text-gray-400 focus:outline-none"
+              >
+                <option value="azure_openai">GPT-5.1 (Azure OpenAI)</option>
+              </select>
+            </div>
+
+            {username && (
+              <div className="flex items-center gap-2 pl-3 border-l border-[var(--card-border)]">
+                <span className="text-xs text-gray-400">{username}</span>
+                <button
+                  onClick={handleLogout}
+                  className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>

@@ -7,11 +7,21 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from backend.auth import (
+    auth_enabled,
+    auth_middleware,
+    create_token,
+    get_token_from_websocket,
+    verify_token,
+    LOGIN_USERNAME,
+    LOGIN_PASSWORD,
+)
 from backend.config import OUTPUTS_DIR
 from backend.orchestrator import PipelineOrchestrator
 
@@ -29,13 +39,20 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS -- use ALLOWED_ORIGINS env var in production, default to * for local dev
+import os
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth middleware -- only active when LOGIN_USERNAME + LOGIN_PASSWORD are set
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
 # Serve generated audio files
 OUTPUTS_DIR.mkdir(exist_ok=True)
@@ -52,6 +69,69 @@ sessions: dict[str, dict[str, Any]] = {}
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "service": "OBD SuperStar Agent"}
+
+
+# ── Auth Endpoints ──
+
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    """Authenticate with username/password and receive a JWT cookie."""
+    if not auth_enabled():
+        return {"message": "Auth not enabled", "authenticated": True}
+
+    body = await request.json()
+    username = body.get("username", "")
+    password = body.get("password", "")
+
+    if username == LOGIN_USERNAME and password == LOGIN_PASSWORD:
+        token = create_token(username)
+        response = JSONResponse(content={
+            "message": "Login successful",
+            "authenticated": True,
+            "username": username,
+        })
+        response.set_cookie(
+            key="obd_token",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            max_age=72 * 3600,  # 3 days
+        )
+        return response
+    else:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid username or password"},
+        )
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Check if the current user is authenticated."""
+    if not auth_enabled():
+        return {"authenticated": True, "auth_enabled": False, "username": "local"}
+
+    from backend.auth import get_token_from_request
+    token = get_token_from_request(request)
+    if token:
+        username = verify_token(token)
+        if username:
+            return {"authenticated": True, "auth_enabled": True, "username": username}
+
+    return JSONResponse(
+        status_code=401,
+        content={"authenticated": False, "auth_enabled": True},
+    )
+
+
+@app.post("/api/auth/logout")
+async def logout():
+    """Clear the auth cookie."""
+    response = JSONResponse(content={"message": "Logged out"})
+    response.delete_cookie("obd_token")
+    return response
 
 
 @app.post("/api/generate")
@@ -202,6 +282,13 @@ async def websocket_generate(ws: WebSocket):
 
     Final message includes the complete result.
     """
+    # WebSocket auth check
+    if auth_enabled():
+        token = get_token_from_websocket(ws)
+        if not token or not verify_token(token):
+            await ws.close(code=4001, reason="Authentication required")
+            return
+
     await ws.accept()
     logger.info("WebSocket client connected")
 
