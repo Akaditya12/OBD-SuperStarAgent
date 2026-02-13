@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: obd-superstar-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: ./render-start.sh
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "3000"
