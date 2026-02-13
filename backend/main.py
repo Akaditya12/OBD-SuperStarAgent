@@ -23,6 +23,7 @@ from backend.auth import (
     LOGIN_PASSWORD,
 )
 from backend.config import OUTPUTS_DIR
+from backend.database import init_db, save_campaign, list_campaigns, get_campaign, delete_campaign
 from backend.orchestrator import PipelineOrchestrator
 
 # ── Logging ──
@@ -57,6 +58,9 @@ app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 # Serve generated audio files
 OUTPUTS_DIR.mkdir(exist_ok=True)
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
+
+# Initialize campaign database
+init_db()
 
 # ── In-memory session store ──
 sessions: dict[str, dict[str, Any]] = {}
@@ -170,6 +174,9 @@ async def generate_scripts(
     )
 
     session_id = result.get("session_id", "unknown")
+    result["country"] = country
+    result["telco"] = telco
+    result["language"] = language or ""
     sessions[session_id] = result
 
     return result
@@ -256,6 +263,76 @@ async def download_scripts(session_id: str, fmt: str = "json"):
     )
 
 
+# ── Campaign Endpoints ──
+
+
+@app.post("/api/campaigns")
+async def create_campaign(request: Request):
+    """Save a pipeline result as a named campaign."""
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    name = body.get("name", "").strip()
+
+    if not session_id or not name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "session_id and name are required"},
+        )
+
+    if session_id not in sessions:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Session not found. Generate a campaign first."},
+        )
+
+    result = sessions[session_id]
+
+    # Get username from auth
+    username = getattr(request.state, "username", "local")
+
+    # Extract country/telco/language from the result or session
+    country = result.get("country", "")
+    telco = result.get("telco", "")
+    language = result.get("language", "")
+
+    campaign = save_campaign(
+        campaign_id=session_id,
+        name=name,
+        created_by=username,
+        country=country,
+        telco=telco,
+        language=language,
+        result=result,
+    )
+
+    return campaign
+
+
+@app.get("/api/campaigns")
+async def get_campaigns():
+    """List all saved campaigns."""
+    campaigns = list_campaigns()
+    return {"campaigns": campaigns}
+
+
+@app.get("/api/campaigns/{campaign_id}")
+async def get_campaign_detail(campaign_id: str):
+    """Get full details of a saved campaign."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        return JSONResponse(status_code=404, content={"error": "Campaign not found"})
+    return campaign
+
+
+@app.delete("/api/campaigns/{campaign_id}")
+async def remove_campaign(campaign_id: str):
+    """Delete a saved campaign."""
+    deleted = delete_campaign(campaign_id)
+    if not deleted:
+        return JSONResponse(status_code=404, content={"error": "Campaign not found"})
+    return {"message": "Campaign deleted"}
+
+
 # ── WebSocket Endpoint ──
 
 
@@ -340,6 +417,10 @@ async def websocket_generate(ws: WebSocket):
         )
 
         session_id = result.get("session_id", "unknown")
+        # Store input params alongside result for campaign saving
+        result["country"] = country
+        result["telco"] = telco
+        result["language"] = language or ""
         sessions[session_id] = result
 
         # Send the final result -- distinguish success vs failure

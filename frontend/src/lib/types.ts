@@ -129,3 +129,19 @@ export interface WsProgressMessage {
   session_id?: string;
   result?: PipelineResult;
 }
+
+export interface Campaign {
+  id: string;
+  name: string;
+  created_by: string;
+  created_at: string;
+  country: string;
+  telco: string;
+  language: string;
+  script_count: number;
+  has_audio: boolean;
+}
+
+export interface CampaignDetail extends Campaign {
+  result: PipelineResult;
+}

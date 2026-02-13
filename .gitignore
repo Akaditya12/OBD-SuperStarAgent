@@ -19,6 +19,9 @@ frontend/out/
 # Generated outputs
 backend/outputs/
 
+# Campaign database (user data)
+backend/campaigns.db
+
 # IDE
 .vscode/
 .idea/

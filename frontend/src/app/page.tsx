@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Zap,
   ArrowRight,
@@ -12,6 +13,9 @@ import {
   Mic2,
   LogOut,
   Loader2,
+  Save,
+  CheckCircle2,
+  LayoutDashboard,
 } from "lucide-react";
 import ProductUpload from "@/components/ProductUpload";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
@@ -83,7 +87,34 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Save campaign state
+  const [campaignName, setCampaignName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
   const canStart = productText.trim() && country && telco;
+
+  const handleSaveCampaign = async () => {
+    if (!campaignName.trim() || !result?.session_id) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: result.session_id,
+          name: campaignName.trim(),
+        }),
+      });
+      if (res.ok) {
+        setSaved(true);
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Track which step index we're on for progress updates
   const stepIndexRef = useRef(0);
@@ -259,8 +290,15 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Provider selector + User menu */}
+          {/* Dashboard + Provider selector + User menu */}
           <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              Dashboard
+            </Link>
             <div className="flex items-center gap-2">
               <Settings2 className="w-4 h-4 text-gray-500" />
               <select
@@ -406,12 +444,57 @@ export default function Home() {
                   setWizardStep("input");
                   setResult(null);
                   setError(null);
+                  setSaved(false);
+                  setCampaignName("");
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--card-border)] text-sm text-gray-400 hover:text-white hover:border-brand-500/30 transition-all"
               >
                 <ArrowLeft className="w-4 h-4" />
                 New Campaign
               </button>
+            </div>
+
+            {/* Save Campaign */}
+            <div className="mb-8 p-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+              {saved ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-[var(--success)]" />
+                    <span className="text-sm text-gray-300">
+                      Saved as <span className="font-medium text-white">{campaignName}</span>
+                    </span>
+                  </div>
+                  <Link
+                    href="/dashboard"
+                    className="flex items-center gap-2 text-sm text-brand-400 hover:text-brand-300 transition-colors"
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    View Dashboard
+                  </Link>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={campaignName}
+                    onChange={(e) => setCampaignName(e.target.value)}
+                    placeholder="Name this campaign (e.g. EVA Cameroon Q1)"
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--background)] border border-[var(--card-border)] text-white placeholder-gray-500 text-sm focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/30 transition-colors"
+                  />
+                  <button
+                    onClick={handleSaveCampaign}
+                    disabled={!campaignName.trim() || saving}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-medium hover:bg-brand-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {saving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save Campaign
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
