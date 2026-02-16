@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -64,6 +67,107 @@ init_db()
 
 # ── In-memory session store ──
 sessions: dict[str, dict[str, Any]] = {}
+
+
+# ── Background pipeline tracker ──
+
+@dataclass
+class PipelineState:
+    """Tracks a running or completed pipeline."""
+    session_id: str
+    status: str = "running"  # running | done | error
+    progress_log: list[dict[str, Any]] = field(default_factory=list)
+    result: Optional[dict[str, Any]] = None
+    error_message: str = ""
+    task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+    subscribers: list[WebSocket] = field(default_factory=list)
+
+pipelines: dict[str, PipelineState] = {}
+
+
+async def _run_pipeline_bg(
+    state: PipelineState,
+    product_text: str,
+    country: str,
+    telco: str,
+    language: Optional[str],
+    provider: Optional[str],
+) -> None:
+    """Run the pipeline as a background task, storing progress in state."""
+
+    async def on_progress(agent: str, status: str, data: dict[str, Any]) -> None:
+        msg = {
+            "agent": agent,
+            "status": status,
+            "message": data.get("message", ""),
+            "data": {
+                k: v for k, v in data.items()
+                if k != "message" and _is_json_serializable(v)
+            },
+        }
+        state.progress_log.append(msg)
+        # Broadcast to any connected WebSocket subscribers
+        dead: list[WebSocket] = []
+        for ws in state.subscribers:
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            state.subscribers.remove(ws)
+
+    try:
+        orchestrator = PipelineOrchestrator(
+            provider=provider,
+            on_progress=on_progress,
+        )
+        result = await orchestrator.run(
+            product_text=product_text,
+            country=country,
+            telco=telco,
+            language=language,
+        )
+        session_id = result.get("session_id", state.session_id)
+        result["country"] = country
+        result["telco"] = telco
+        result["language"] = language or ""
+        sessions[session_id] = result
+        state.result = _make_serializable(result)
+        state.status = "error" if "error" in result else "done"
+
+        # Notify subscribers of completion
+        done_msg = {
+            "agent": "Pipeline",
+            "status": state.status,
+            "message": result.get("error", "Pipeline complete"),
+            "session_id": session_id,
+            "result": state.result,
+        }
+        state.progress_log.append(done_msg)
+        dead = []
+        for ws in state.subscribers:
+            try:
+                await ws.send_json(done_msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            state.subscribers.remove(ws)
+
+    except Exception as e:
+        logger.exception(f"Background pipeline error: {e}")
+        state.status = "error"
+        state.error_message = str(e)
+        err_msg = {
+            "agent": "Pipeline",
+            "status": "error",
+            "message": str(e),
+        }
+        state.progress_log.append(err_msg)
+        for ws in list(state.subscribers):
+            try:
+                await ws.send_json(err_msg)
+            except Exception:
+                pass
 
 
 # ── REST Endpoints ──
@@ -136,6 +240,65 @@ async def logout():
     response = JSONResponse(content={"message": "Logged out"})
     response.delete_cookie("obd_token")
     return response
+
+
+# ── Background Pipeline Endpoints ──
+
+
+@app.post("/api/generate/start")
+async def start_pipeline(request: Request):
+    """Start the pipeline as a background task. Returns session_id immediately."""
+    body = await request.json()
+    product_text = body.get("product_text", "")
+    country = body.get("country", "")
+    telco = body.get("telco", "")
+    language = body.get("language")
+    provider = body.get("provider")
+
+    if not product_text or not country or not telco:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "product_text, country, and telco are required"},
+        )
+
+    session_id = uuid.uuid4().hex[:8]
+    state = PipelineState(session_id=session_id)
+    pipelines[session_id] = state
+
+    task = asyncio.create_task(
+        _run_pipeline_bg(state, product_text, country, telco, language, provider)
+    )
+    state.task = task
+
+    logger.info(f"Pipeline started in background: session_id={session_id}")
+    return {"session_id": session_id, "status": "running"}
+
+
+@app.get("/api/generate/{session_id}/status")
+async def pipeline_status(session_id: str):
+    """Get current pipeline status, progress log, and result if done."""
+    state = pipelines.get(session_id)
+    if not state:
+        # Check if it's a completed session from the old flow
+        if session_id in sessions:
+            return {
+                "session_id": session_id,
+                "status": "done",
+                "progress": [],
+                "result": _make_serializable(sessions[session_id]),
+            }
+        return JSONResponse(status_code=404, content={"error": "Pipeline not found"})
+
+    resp: dict[str, Any] = {
+        "session_id": session_id,
+        "status": state.status,
+        "progress": state.progress_log,
+    }
+    if state.result:
+        resp["result"] = state.result
+    if state.error_message:
+        resp["error"] = state.error_message
+    return resp
 
 
 @app.post("/api/generate")
@@ -333,7 +496,61 @@ async def remove_campaign(campaign_id: str):
     return {"message": "Campaign deleted"}
 
 
-# ── WebSocket Endpoint ──
+# ── WebSocket Endpoints ──
+
+
+@app.websocket("/ws/progress/{session_id}")
+async def websocket_progress(ws: WebSocket, session_id: str):
+    """Read-only WebSocket that streams progress for a background pipeline.
+
+    On connect: sends all buffered progress messages (catch-up).
+    Then streams new messages as they arrive.
+    Disconnect does NOT stop the pipeline.
+    """
+    if auth_enabled():
+        token = get_token_from_websocket(ws)
+        if not token or not verify_token(token):
+            await ws.close(code=4001, reason="Authentication required")
+            return
+
+    state = pipelines.get(session_id)
+    if not state:
+        await ws.close(code=4004, reason="Pipeline not found")
+        return
+
+    await ws.accept()
+    logger.info(f"Progress WS connected for session {session_id}")
+
+    # Send all buffered progress (catch-up)
+    for msg in list(state.progress_log):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            return
+
+    # If already finished, close after catch-up
+    if state.status in ("done", "error"):
+        try:
+            await ws.close()
+        except Exception:
+            pass
+        return
+
+    # Subscribe for live updates
+    state.subscribers.append(ws)
+    try:
+        # Keep connection alive until client disconnects or pipeline finishes
+        while True:
+            # We just wait for the client to disconnect; all sending is done
+            # from _run_pipeline_bg via the subscribers list
+            try:
+                await ws.receive_text()
+            except WebSocketDisconnect:
+                break
+    finally:
+        if ws in state.subscribers:
+            state.subscribers.remove(ws)
+        logger.info(f"Progress WS disconnected for session {session_id}")
 
 
 @app.websocket("/ws/generate")

@@ -171,7 +171,64 @@ export default function Home() {
     []
   );
 
-  const startPipeline = useCallback(() => {
+  // Connect to the read-only progress WebSocket for a given session
+  const connectProgressWs = useCallback(
+    (sessionId: string) => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/ws/progress/${sessionId}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const data: WsProgressMessage = JSON.parse(event.data);
+          const { agent, status, message } = data;
+
+          if (agent === "Pipeline" && status === "done") {
+            const pipelineResult = (data.result || {}) as PipelineResult;
+            setResult(pipelineResult);
+            setWizardStep("results");
+            localStorage.removeItem("obd_active_session");
+            return;
+          }
+
+          if (agent === "Pipeline" && status === "error") {
+            setError(message || "Pipeline failed");
+            if (data.result) {
+              setResult(data.result as PipelineResult);
+            }
+            setWizardStep("results");
+            localStorage.removeItem("obd_active_session");
+            return;
+          }
+
+          if (agent && status) {
+            updateStep(
+              agent,
+              status as ProgressStep["status"],
+              message || "",
+              data.data as Record<string, unknown> | undefined
+            );
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+
+      ws.onerror = () => {
+        setError(
+          "WebSocket connection failed. Make sure the backend is running."
+        );
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+      };
+    },
+    [updateStep]
+  );
+
+  const startPipeline = useCallback(async () => {
     setWizardStep("running");
     setError(null);
     setResult(null);
@@ -180,74 +237,90 @@ export default function Home() {
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
 
-    // Determine WebSocket URL -- use same host as the page (works via rewrite proxy)
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/generate`;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
+    try {
+      const res = await fetch("/api/generate/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           product_text: productText,
           country,
           telco,
           language: language || undefined,
           provider: provider || undefined,
-        })
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setError(err.error || "Failed to start pipeline");
+        return;
+      }
+
+      const { session_id } = await res.json();
+      localStorage.setItem("obd_active_session", session_id);
+      connectProgressWs(session_id);
+    } catch {
+      setError(
+        "Failed to start pipeline. Make sure the backend is running on port 8000."
       );
-    };
+    }
+  }, [productText, country, telco, language, provider, connectProgressWs]);
 
-    ws.onmessage = (event) => {
+  // Resume an active pipeline on mount (e.g. after navigating back)
+  useEffect(() => {
+    const activeSession = localStorage.getItem("obd_active_session");
+    if (!activeSession) return;
+
+    let cancelled = false;
+
+    (async () => {
       try {
-        const data: WsProgressMessage = JSON.parse(event.data);
-        const { agent, status, message } = data;
-
-        if (agent === "Pipeline" && status === "done") {
-          // Pipeline completed successfully -- show results
-          const pipelineResult = (data.result || {}) as PipelineResult;
-          setResult(pipelineResult);
-          setWizardStep("results");
+        const res = await fetch(`/api/generate/${activeSession}/status`);
+        if (!res.ok) {
+          localStorage.removeItem("obd_active_session");
           return;
         }
+        const data = await res.json();
+        if (cancelled) return;
 
-        if (agent === "Pipeline" && status === "error") {
-          // Pipeline failed -- show error with any partial results
-          setError(message || "Pipeline failed");
-          if (data.result) {
-            setResult(data.result as PipelineResult);
-          }
+        if (data.status === "done" && data.result) {
+          setResult(data.result as PipelineResult);
           setWizardStep("results");
-          return;
-        }
-
-        // Agent progress updates
-        if (agent && status) {
-          updateStep(
-            agent,
-            status as ProgressStep["status"],
-            message || "",
-            data.data as Record<string, unknown> | undefined
+          localStorage.removeItem("obd_active_session");
+        } else if (data.status === "error") {
+          setError(data.error || "Pipeline failed");
+          if (data.result) setResult(data.result as PipelineResult);
+          setWizardStep("results");
+          localStorage.removeItem("obd_active_session");
+        } else if (data.status === "running") {
+          // Replay buffered progress into the UI
+          setWizardStep("running");
+          setProgressSteps(
+            PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
           );
+          for (const msg of data.progress || []) {
+            if (msg.agent && msg.status && msg.agent !== "Pipeline") {
+              updateStep(
+                msg.agent,
+                msg.status as ProgressStep["status"],
+                msg.message || "",
+                msg.data as Record<string, unknown> | undefined
+              );
+            }
+          }
+          connectProgressWs(activeSession);
         }
       } catch {
-        // Ignore parse errors
+        localStorage.removeItem("obd_active_session");
       }
-    };
+    })();
 
-    ws.onerror = () => {
-      setError(
-        "WebSocket connection failed. Make sure the backend is running on port 8000."
-      );
+    return () => {
+      cancelled = true;
     };
+  }, [connectProgressWs, updateStep]);
 
-    ws.onclose = () => {
-      wsRef.current = null;
-    };
-  }, [productText, country, telco, language, provider, updateStep]);
-
-  // Cleanup WebSocket on unmount
+  // Cleanup WebSocket on unmount -- just disconnect the viewer, pipeline keeps running
   useEffect(() => {
     return () => {
       wsRef.current?.close();
@@ -446,6 +519,7 @@ export default function Home() {
                   setError(null);
                   setSaved(false);
                   setCampaignName("");
+                  localStorage.removeItem("obd_active_session");
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--card-border)] text-sm text-gray-400 hover:text-white hover:border-brand-500/30 transition-all"
               >
