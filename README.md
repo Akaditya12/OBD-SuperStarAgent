@@ -23,10 +23,10 @@ Product Doc + Country + Telco
 [Agent 3: Script Writer]       -- Revised scripts based on feedback
         |
         v
-[Agent 5: Voice Selector]      -- Picks optimal ElevenLabs voice
+[Agent 5: Voice Selector]      -- Picks optimal voice for market
         |
         v
-[Agent 6: Audio Producer]      -- Generates MP3 files via ElevenLabs V3 TTS
+[Agent 6: Audio Producer]      -- TTS: Murf AI → ElevenLabs → edge-tts (free)
         |
         v
     Final Audio Files (downloadable)
@@ -36,8 +36,8 @@ Product Doc + Country + Telco
 
 - **Backend**: Python FastAPI with WebSocket support
 - **Frontend**: Next.js 15 + React 19 + Tailwind CSS
-- **LLM**: Azure OpenAI (GPT-5.1-chat) -- reasoning model with extended token support
-- **TTS**: ElevenLabs V3 with audio tags for expressiveness
+- **LLM**: Azure OpenAI (GPT-5.1-chat)
+- **TTS**: Murf AI (primary), ElevenLabs or edge-tts (free) as fallbacks. Language override supported for scripts.
 
 ## Quick Start
 
@@ -83,7 +83,9 @@ Visit [http://localhost:3000](http://localhost:3000) in your browser.
 | `AZURE_OPENAI_ENDPOINT` | Yes | Your Azure OpenAI resource URL |
 | `AZURE_OPENAI_DEPLOYMENT` | Yes | Deployment name (e.g. `gpt-5.1-chat`) |
 | `AZURE_OPENAI_API_VERSION` | Yes | API version (e.g. `2025-01-01-preview`) |
-| `ELEVENLABS_API_KEY` | Optional | Voice synthesis via ElevenLabs V3 (paid plan recommended for expressive audio) |
+| `MURF_API_KEY` | Optional | Primary TTS (Murf AI). Sign up at [murf.ai](https://murf.ai) |
+| `ELEVENLABS_API_KEY` | Optional | Fallback TTS. If neither Murf nor ElevenLabs is set, edge-tts (free) is used |
+| `LOGIN_USERNAME` / `LOGIN_PASSWORD` | Optional | If both set, login is required (e.g. on Render) |
 
 ## API Endpoints
 
@@ -115,9 +117,9 @@ Visit [http://localhost:3000](http://localhost:3000) in your browser.
 
 5. **Script Revision**: Scripts are revised based on panel feedback.
 
-6. **Voice Selector**: Queries ElevenLabs for the best voice matching the target market, configures V3 parameters for expressiveness.
+6. **Voice Selector**: Picks the best voice for the target market (Murf, ElevenLabs, or edge-tts).
 
-7. **Audio Producer**: Generates MP3 files using ElevenLabs V3 TTS with audio tags like `[excited]`, `[whispers]`, `[pause]` for natural delivery.
+7. **Audio Producer**: Generates MP3 files via Murf AI (or ElevenLabs/edge-tts). Script tags like `[excited]` are stripped before TTS; BGM is mixed at low volume.
 
 ## Sample Products
 
@@ -127,20 +129,16 @@ The `sample_products/` directory contains product descriptions ready for use:
 
 To use: Upload the product file in the UI, select your target country and telco, and run the pipeline.
 
-## Team Usage
+## Dashboard & persistence
 
-1. Clone this repo
-2. Copy `.env.example` to `.env` and fill in your API keys
-3. Start backend and frontend (see Quick Start above)
-4. Open `http://localhost:3000` and generate campaigns
-5. Download scripts (JSON/text) and audio files from the results page
+- **Dashboard** (`/dashboard`): Lists saved campaigns (name, country, telco, language, script/audio counts). Expand a campaign to see script variants and play/download audio.
+- **Saving**: Click "Save to dashboard" on the results page to store the campaign in the local SQLite DB (`backend/campaigns.db`). Comments and collaboration use the same DB.
+- **On Render**: The filesystem is ephemeral — `campaigns.db` and `outputs/` are wiped on each deploy. Use Render for demos; for long-term storage consider a hosted DB and object store (see `PROJECT.md`).
 
-## ElevenLabs V3 Audio Tags
+## Deploy to Render
 
-Scripts are generated with embedded audio tags for expressive delivery:
+1. Connect the GitHub repo at [dashboard.render.com](https://dashboard.render.com) (Blueprint or Web Service).
+2. Set environment variables in the Render dashboard (see table above); do not commit `.env`.
+3. Deploy uses the repo’s `Dockerfile` and `render-start.sh`. Health check: `/api/health`.
 
-- `[excited]`, `[curious]`, `[whispers]` -- Emotional states
-- `[laughs]`, `[sigh]`, `[pause]` -- Non-verbal cues
-- `CAPITALIZED WORDS` -- Emphasis
-- `...` (ellipses) -- Dramatic pauses
-- `[short pause]`, `[long pause]` -- Timed breaks
+See **`PROJECT.md`** for continuity (running without Cursor, where progress is saved, how to extend the project).
