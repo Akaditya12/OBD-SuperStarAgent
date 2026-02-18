@@ -76,6 +76,7 @@ export interface VoiceSelection {
     voice_id: string;
     name: string;
     reason: string;
+    preview_url?: string;
   }[];
   audio_production_notes?: string;
 }
@@ -95,16 +96,19 @@ export interface AudioFile {
 export interface AudioResult {
   session_id: string;
   session_dir: string;
+  tts_engine?: "elevenlabs" | "edge-tts";
   voice_used: {
     voice_id: string;
     name: string;
     settings: VoiceSettings;
   };
   audio_files: AudioFile[];
+  failed_files?: AudioFile[];
   summary: {
     total_generated: number;
     total_failed: number;
     variants_count: number;
+    has_background_music?: boolean;
   };
 }
 
@@ -144,4 +148,32 @@ export interface Campaign {
 
 export interface CampaignDetail extends Campaign {
   result: PipelineResult;
+}
+
+// ── Collaboration Types ──
+
+export interface Comment {
+  id: string;
+  campaign_id: string;
+  username: string;
+  text: string;
+  created_at: string;
+}
+
+export interface PresenceUser {
+  username: string;
+  connected_at: number;
+  last_active: number;
+  viewing_campaign: string | null;
+  color: string;
+}
+
+export interface CollaborationEvent {
+  id: string;
+  type: "campaign_created" | "comment_added" | "user_joined" | "user_left";
+  username: string;
+  campaign_id?: string;
+  campaign_name?: string;
+  detail?: string;
+  timestamp: number;
 }

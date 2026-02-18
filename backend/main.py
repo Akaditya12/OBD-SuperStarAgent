@@ -26,7 +26,28 @@ from backend.auth import (
     LOGIN_PASSWORD,
 )
 from backend.config import OUTPUTS_DIR
-from backend.database import init_db, save_campaign, list_campaigns, get_campaign, delete_campaign
+from backend.database import (
+    init_db,
+    save_campaign,
+    list_campaigns,
+    get_campaign,
+    delete_campaign,
+    save_comment,
+    list_comments,
+    delete_comment,
+)
+from backend.collaboration import (
+    register_user,
+    unregister_user,
+    update_user_activity,
+    get_online_users,
+    get_users_viewing_campaign,
+    get_or_create_room,
+    cleanup_room,
+    record_activity,
+    get_recent_activity,
+    broadcast_to_all,
+)
 from backend.orchestrator import PipelineOrchestrator
 
 # ── Logging ──
@@ -132,6 +153,9 @@ async def _run_pipeline_bg(
         result["telco"] = telco
         result["language"] = language or ""
         sessions[session_id] = result
+        # Also store under the pipeline's session_id so the frontend can find it
+        if state.session_id != session_id:
+            sessions[state.session_id] = result
         state.result = _make_serializable(result)
         state.status = "error" if "error" in result else "done"
 
@@ -240,6 +264,73 @@ async def logout():
     response = JSONResponse(content={"message": "Logged out"})
     response.delete_cookie("obd_token")
     return response
+
+
+# ── File Upload / Text Extraction ──
+
+
+@app.post("/api/upload/extract-text")
+async def extract_text_from_file(file: UploadFile = File(...)):
+    """Extract text content from uploaded documents (PDF, DOCX, PPTX, TXT, MD)."""
+    if not file.filename:
+        return JSONResponse(status_code=400, content={"error": "No file provided"})
+
+    ext = Path(file.filename).suffix.lower()
+    content = await file.read()
+
+    try:
+        if ext == ".pdf":
+            import pdfplumber
+            import io
+            text_parts = []
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+            text = "\n\n".join(text_parts)
+
+        elif ext in (".doc", ".docx"):
+            import docx
+            import io
+            doc = docx.Document(io.BytesIO(content))
+            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+        elif ext == ".pptx":
+            from pptx import Presentation
+            import io
+            prs = Presentation(io.BytesIO(content))
+            text_parts = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        text_parts.append(shape.text)
+            text = "\n\n".join(text_parts)
+
+        elif ext in (".txt", ".md"):
+            text = content.decode("utf-8", errors="replace")
+
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Unsupported file type: {ext}"},
+            )
+
+        if not text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Could not extract any text from the file"},
+            )
+
+        logger.info(f"Extracted {len(text)} chars from {file.filename} ({ext})")
+        return {"text": text, "filename": file.filename, "chars": len(text)}
+
+    except Exception as e:
+        logger.error(f"File extraction failed for {file.filename}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to extract text: {str(e)}"},
+        )
 
 
 # ── Background Pipeline Endpoints ──
@@ -494,6 +585,136 @@ async def remove_campaign(campaign_id: str):
     if not deleted:
         return JSONResponse(status_code=404, content={"error": "Campaign not found"})
     return {"message": "Campaign deleted"}
+
+
+# ── Collaboration Endpoints ──
+
+
+@app.get("/api/presence")
+async def get_presence():
+    """Get all currently online users."""
+    return {"users": get_online_users()}
+
+
+@app.get("/api/presence/{campaign_id}")
+async def get_campaign_presence(campaign_id: str):
+    """Get users currently viewing a specific campaign."""
+    return {"users": get_users_viewing_campaign(campaign_id)}
+
+
+@app.get("/api/activity")
+async def get_activity(limit: int = 20):
+    """Get recent activity feed."""
+    return {"events": get_recent_activity(limit)}
+
+
+@app.get("/api/campaigns/{campaign_id}/comments")
+async def get_comments(campaign_id: str):
+    """List all comments for a campaign."""
+    comments = list_comments(campaign_id)
+    return {"comments": comments}
+
+
+@app.post("/api/campaigns/{campaign_id}/comments")
+async def add_comment(campaign_id: str, request: Request):
+    """Add a comment to a campaign."""
+    body = await request.json()
+    text = body.get("text", "").strip()
+    username = getattr(request.state, "username", body.get("username", "anonymous"))
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "Comment text is required"})
+
+    comment_id = str(uuid.uuid4())
+    comment = save_comment(comment_id, campaign_id, username, text)
+
+    # Record activity and broadcast to collaboration room
+    campaign = get_campaign(campaign_id)
+    campaign_name = campaign["name"] if campaign else "Unknown"
+    event = record_activity(
+        "comment_added", username, campaign_id, campaign_name, text[:100]
+    )
+
+    room = get_or_create_room(campaign_id)
+    await room.broadcast({"type": "comment_added", "comment": comment})
+    await broadcast_to_all({"type": "activity", "event": event})
+
+    return comment
+
+
+@app.delete("/api/campaigns/{campaign_id}/comments/{comment_id}")
+async def remove_comment(campaign_id: str, comment_id: str):
+    """Delete a comment."""
+    deleted = delete_comment(comment_id)
+    if not deleted:
+        return JSONResponse(status_code=404, content={"error": "Comment not found"})
+
+    room = get_or_create_room(campaign_id)
+    await room.broadcast({"type": "comment_deleted", "comment_id": comment_id})
+
+    return {"deleted": True}
+
+
+@app.websocket("/ws/collaborate/{campaign_id}")
+async def websocket_collaborate(ws: WebSocket, campaign_id: str):
+    """WebSocket for real-time collaboration on a campaign.
+
+    On connect: sends current presence for the campaign.
+    Receives: heartbeats and user actions.
+    Broadcasts: user joined/left, comments, presence updates.
+    """
+    await ws.accept()
+    ws_id = str(uuid.uuid4())
+
+    # Determine username
+    from backend.auth import get_token_from_websocket, verify_token, auth_enabled
+    username = "anonymous"
+    if auth_enabled():
+        token = get_token_from_websocket(ws)
+        if token:
+            username = verify_token(token) or "anonymous"
+
+    user = register_user(ws_id, username, ws)
+    update_user_activity(ws_id, campaign_id)
+    room = get_or_create_room(campaign_id)
+    room.add(ws_id, ws)
+
+    # Record and broadcast join
+    event = record_activity("user_joined", username, campaign_id)
+    await room.broadcast(
+        {"type": "user_joined", "user": user.to_dict()}, exclude_ws_id=ws_id
+    )
+    await broadcast_to_all({"type": "activity", "event": event})
+
+    # Send current state to the connecting user
+    await ws.send_json({
+        "type": "init",
+        "users": get_users_viewing_campaign(campaign_id),
+        "comments": list_comments(campaign_id),
+    })
+
+    try:
+        while True:
+            data = await ws.receive_json()
+            msg_type = data.get("type", "")
+
+            if msg_type == "heartbeat":
+                update_user_activity(ws_id, campaign_id)
+
+            elif msg_type == "typing":
+                await room.broadcast(
+                    {"type": "typing", "username": username},
+                    exclude_ws_id=ws_id,
+                )
+    except Exception:
+        pass
+    finally:
+        room.remove(ws_id)
+        left_user = unregister_user(ws_id)
+        cleanup_room(campaign_id)
+        if left_user:
+            event = record_activity("user_left", left_user.username, campaign_id)
+            await room.broadcast({"type": "user_left", "username": left_user.username})
+            await broadcast_to_all({"type": "activity", "event": event})
 
 
 # ── WebSocket Endpoints ──

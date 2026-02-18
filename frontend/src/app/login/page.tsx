@@ -2,7 +2,8 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, LogIn, AlertCircle, Loader2 } from "lucide-react";
+import { LogIn, AlertCircle, Loader2 } from "lucide-react";
+import BNGLogo from "@/components/BNGLogo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,11 +44,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center mb-4">
-            <Zap className="w-7 h-7 text-white" />
+          <div className="mx-auto mb-4 flex justify-center">
+            <BNGLogo size={56} />
           </div>
-          <h1 className="text-2xl font-bold text-white">OBD SuperStar Agent</h1>
-          <p className="text-sm text-[var(--muted)] mt-1">
+          <h1 className="text-2xl font-bold text-[var(--text-primary)]">OBD SuperStar Agent</h1>
+          <p className="text-xs text-[var(--accent)] font-medium mt-1">by Black &amp; Green</p>
+          <p className="text-sm text-[var(--muted)] mt-2">
             Sign in to access the platform
           </p>
         </div>
@@ -67,7 +69,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="username"
-              className="block text-sm font-medium text-gray-300 mb-1.5"
+              className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5"
             >
               Username
             </label>
@@ -79,7 +81,7 @@ export default function LoginPage() {
               required
               autoFocus
               autoComplete="username"
-              className="w-full px-4 py-2.5 rounded-xl bg-[var(--background)] border border-[var(--card-border)] text-white placeholder-gray-500 focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/30 transition-colors"
+              className="w-full px-4 py-2.5 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/30 transition-colors"
               placeholder="Enter username"
             />
           </div>
@@ -87,7 +89,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="password"
-              className="block text-sm font-medium text-gray-300 mb-1.5"
+              className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5"
             >
               Password
             </label>
@@ -98,7 +100,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full px-4 py-2.5 rounded-xl bg-[var(--background)] border border-[var(--card-border)] text-white placeholder-gray-500 focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/30 transition-colors"
+              className="w-full px-4 py-2.5 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/30 transition-colors"
               placeholder="Enter password"
             />
           </div>
@@ -106,7 +108,8 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading || !username || !password}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-brand-600 to-brand-700 text-white font-semibold hover:from-brand-500 hover:to-brand-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -118,7 +121,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-[var(--muted)] mt-6">
-          Contact your admin for access credentials
+          Powered by BNG &middot; Touching Billions of Lives
         </p>
       </div>
     </div>

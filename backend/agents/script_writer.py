@@ -1,7 +1,11 @@
-"""Agent 3: Script Writer -- creates Hook + Body + CTA scripts with ElevenLabs V3 audio tags."""
+"""Agent 3: Script Writer -- creates Hook + Body + CTA scripts with ElevenLabs V3 audio tags.
+
+Generates scripts in parallel batches to avoid LLM output-length limits.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -12,6 +16,14 @@ from backend.config import MAX_SCRIPT_WORDS, NUM_SCRIPT_VARIANTS
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
+
+CREATIVE_ANGLES = [
+    "Curiosity Gap",
+    "Humor + Social Proof",
+    "Storytelling (Relatable Scenario)",
+    "Urgency + Fear of Missing Out",
+    "Emotional / Aspirational",
+]
 
 SYSTEM_PROMPT = """\
 You are an expert OBD (Outbound Dialer) copywriter who creates promotional voice scripts \
@@ -44,22 +56,23 @@ OUTPUT: Valid JSON:
 "fallback_2": "string", "polite_closure": "string", "full_script": "string", \
 "word_count": 0, "estimated_duration_seconds": 0, \
 "audio_tags_used": ["list"]}}], \
-"language_used": "string", "creative_rationale": "string"}}
-
-Generate exactly {num_variants} variants.\
-""".format(max_words=MAX_SCRIPT_WORDS, num_variants=NUM_SCRIPT_VARIANTS)
+"language_used": "string", "creative_rationale": "string"}}\
+""".format(max_words=MAX_SCRIPT_WORDS)
 
 
 REVISION_SYSTEM_PROMPT = """\
-You are an expert OBD copywriter revising scripts based on evaluation feedback. \
-Apply improvements while keeping the same JSON output format. \
-Rules: under {max_words} words per script, include ElevenLabs V3 audio tags, \
-culturally relevant, clear DTMF CTAs.\
+You are an expert OBD copywriter revising scripts based on evaluation feedback.
+
+Apply the feedback improvements while keeping the same JSON output format.
+Each variant must be under {max_words} words, include ElevenLabs V3 audio tags, \
+be culturally relevant, and have clear DTMF CTAs.
+Keep each variant's unique creative angle (theme) while incorporating feedback.
+
+OUTPUT: Valid JSON with "scripts" array.\
 """.format(max_words=MAX_SCRIPT_WORDS)
 
 
 def _summarize_brief(product_brief: dict[str, Any]) -> str:
-    """Create a concise text summary of the product brief for the prompt."""
     parts = []
     parts.append(f"Product: {product_brief.get('product_name', 'Unknown')}")
     parts.append(f"Type: {product_brief.get('product_type', 'VAS')}")
@@ -86,7 +99,6 @@ def _summarize_brief(product_brief: dict[str, Any]) -> str:
 
 
 def _summarize_market(market_analysis: dict[str, Any]) -> str:
-    """Create a concise text summary of market analysis for the prompt."""
     parts = []
     parts.append(f"Country: {market_analysis.get('country', '?')}")
     parts.append(f"Telco: {market_analysis.get('telco', '?')}")
@@ -155,17 +167,21 @@ class ScriptWriterAgent(BaseAgent):
             logger.info(f"[{self.name}] Generating {NUM_SCRIPT_VARIANTS} new script variants")
             return await self._generate(product_brief, market_analysis)
 
-    async def _generate(
+    async def _generate_batch(
         self,
-        product_brief: dict[str, Any],
-        market_analysis: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Generate fresh scripts."""
-        brief_summary = _summarize_brief(product_brief)
-        market_summary = _summarize_market(market_analysis)
+        brief_summary: str,
+        market_summary: str,
+        angles: list[str],
+        start_id: int,
+    ) -> list[dict[str, Any]]:
+        """Generate a small batch of script variants (2-3 at a time)."""
+        angle_list = ", ".join(angles)
+        count = len(angles)
+        ids = ", ".join(str(start_id + i) for i in range(count))
 
         user_prompt = f"""\
-Create {NUM_SCRIPT_VARIANTS} OBD promotional script variants.
+Create exactly {count} OBD promotional script variant(s) with these creative angles: {angle_list}.
+Use variant_id values: {ids}.
 
 PRODUCT:
 {brief_summary}
@@ -173,19 +189,67 @@ PRODUCT:
 MARKET:
 {market_summary}
 
-Each variant needs a DIFFERENT creative angle (e.g., curiosity gap, humor, urgency, \
-storytelling, social proof). Embed ElevenLabs V3 audio tags in every field. \
-Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" array.\
+Each variant needs its specified creative angle. Embed ElevenLabs V3 audio tags in every field. \
+Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" array of {count} objects.\
 """
 
         response = await self.call_llm(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            max_tokens=32768,
+            max_tokens=8192,
         )
 
-        logger.info(f"[{self.name}] Raw response (first 500 chars): {response[:500]}")
+        logger.info(f"[{self.name}] Batch response ({count} scripts): {len(response)} chars")
         result = self._normalize_result(response)
+        return result.get("scripts", [])
+
+    async def _generate(
+        self,
+        product_brief: dict[str, Any],
+        market_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Generate scripts in parallel batches to avoid LLM output-length limits."""
+        brief_summary = _summarize_brief(product_brief)
+        market_summary = _summarize_market(market_analysis)
+
+        angles = CREATIVE_ANGLES[:NUM_SCRIPT_VARIANTS]
+
+        # Split into batches of 2
+        batches: list[tuple[list[str], int]] = []
+        for i in range(0, len(angles), 2):
+            batch_angles = angles[i:i + 2]
+            batches.append((batch_angles, i + 1))
+
+        logger.info(
+            f"[{self.name}] Generating {len(angles)} variants in {len(batches)} "
+            f"parallel batches of 2"
+        )
+
+        tasks = [
+            self._generate_batch(brief_summary, market_summary, batch_angles, start_id)
+            for batch_angles, start_id in batches
+        ]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_scripts: list[dict[str, Any]] = []
+        for i, res in enumerate(batch_results):
+            if isinstance(res, Exception):
+                logger.error(f"[{self.name}] Batch {i+1} failed: {res}")
+                continue
+            all_scripts.extend(res)
+
+        # Re-number variant IDs sequentially
+        for idx, script in enumerate(all_scripts):
+            script["variant_id"] = idx + 1
+
+        logger.info(f"[{self.name}] Total scripts generated: {len(all_scripts)}")
+
+        result: dict[str, Any] = {
+            "scripts": all_scripts,
+            "language_used": all_scripts[0].get("language", "") if all_scripts else "",
+            "creative_rationale": f"Generated {len(all_scripts)} variants across {len(batches)} parallel batches",
+        }
+
         self._validate_scripts(result)
         return result
 
@@ -196,8 +260,7 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         feedback: dict[str, Any],
         previous_scripts: dict[str, Any],
     ) -> dict[str, Any]:
-        """Revise scripts based on evaluation feedback."""
-        # Extract just the consensus feedback, not the full evaluation
+        """Revise scripts in parallel batches based on evaluation feedback."""
         consensus = feedback.get("consensus", {})
         improvements = consensus.get("critical_improvements", [])
         instructions = consensus.get("revision_instructions", "")
@@ -210,27 +273,65 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         if not feedback_text:
             feedback_text = json.dumps(feedback, indent=2)[:2000]
 
-        user_prompt = f"""\
-Revise these OBD scripts based on evaluation feedback.
+        scripts = previous_scripts.get("scripts", [])
+        if not scripts:
+            return previous_scripts
+
+        # Revise in batches of 2
+        async def _revise_batch(batch_scripts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            count = len(batch_scripts)
+            user_prompt = f"""\
+Revise these {count} OBD script(s) based on evaluation feedback.
 
 CURRENT SCRIPTS:
-{json.dumps(previous_scripts, indent=2)}
+{json.dumps({"scripts": batch_scripts}, indent=2)}
 
 FEEDBACK:
 {feedback_text}
 
-Apply improvements. Keep same JSON format with "scripts" array. \
-Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON.\
+Return ALL {count} revised variants. Keep each variant's unique theme. \
+Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. \
+Output valid JSON with "scripts" array of {count} objects.\
 """
+            response = await self.call_llm(
+                system_prompt=REVISION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                max_tokens=8192,
+            )
+            result = self._normalize_result(response)
+            revised = result.get("scripts", [])
 
-        response = await self.call_llm(
-            system_prompt=REVISION_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            max_tokens=32768,
-        )
+            # If revision returned fewer, merge originals back
+            if len(revised) < count:
+                revised_ids = {s.get("variant_id") for s in revised}
+                for orig in batch_scripts:
+                    if orig.get("variant_id") not in revised_ids:
+                        revised.append(orig)
 
-        logger.info(f"[{self.name}] Raw revision response (first 500 chars): {response[:500]}")
-        result = self._normalize_result(response)
+            return revised
+
+        batches = [scripts[i:i + 2] for i in range(0, len(scripts), 2)]
+        logger.info(f"[{self.name}] Revising {len(scripts)} scripts in {len(batches)} parallel batches")
+
+        tasks = [_revise_batch(batch) for batch in batches]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_revised: list[dict[str, Any]] = []
+        for i, res in enumerate(batch_results):
+            if isinstance(res, Exception):
+                logger.error(f"[{self.name}] Revision batch {i+1} failed: {res}")
+                all_revised.extend(batches[i])  # Keep originals on failure
+                continue
+            all_revised.extend(res)
+
+        all_revised.sort(key=lambda s: s.get("variant_id", 0))
+
+        result: dict[str, Any] = {
+            "scripts": all_revised,
+            "language_used": previous_scripts.get("language_used", ""),
+            "creative_rationale": f"Revised {len(all_revised)} variants based on evaluation feedback",
+        }
+
         self._validate_scripts(result)
         return result
 
@@ -238,11 +339,9 @@ Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. Outpu
         """Parse and normalize the LLM response into expected format."""
         result = self.parse_json(response)
 
-        # Handle alternative key names
         if "scripts" not in result and "variants" in result:
             result["scripts"] = result.pop("variants")
 
-        # Handle single script returned as top-level object
         if "scripts" not in result and "hook" in result and "body" in result:
             result = {
                 "scripts": [result],
@@ -251,10 +350,12 @@ Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. Outpu
             }
 
         if "scripts" not in result:
-            logger.warning(f"[{self.name}] Unexpected response structure. Keys: {list(result.keys())}")
+            if "error" in result:
+                logger.error(f"[{self.name}] LLM returned error: {result['error']}")
+            else:
+                logger.warning(f"[{self.name}] Unexpected response structure. Keys: {list(result.keys())}")
             result["scripts"] = []
 
-        # Ensure each script has required fields
         for i, script in enumerate(result.get("scripts", [])):
             if "variant_id" not in script:
                 script["variant_id"] = i + 1
@@ -268,7 +369,6 @@ Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. Outpu
         scripts = result.get("scripts", [])
         for script in scripts:
             full_text = script.get("full_script", "")
-            # Strip audio tags for word count
             clean_text = re.sub(r"\[.*?\]", "", full_text)
             word_count = len(clean_text.split())
             script["word_count"] = word_count

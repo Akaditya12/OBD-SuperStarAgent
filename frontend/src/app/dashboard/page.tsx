@@ -1,59 +1,79 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  Zap,
-  LayoutDashboard,
-  ArrowLeft,
   Trash2,
+  Globe,
+  Building2,
   ChevronDown,
   ChevronUp,
-  Globe,
-  Radio,
-  Calendar,
-  User,
-  FileText,
   Volume2,
+  Play,
+  Download,
+  FileText,
+  Search,
   Loader2,
-  FolderOpen,
+  Calendar,
 } from "lucide-react";
+import StatsCards from "@/components/StatsCards";
+import PresenceBar from "@/components/PresenceBar";
+import CommentThread from "@/components/CommentThread";
+import ActivityFeed from "@/components/ActivityFeed";
+import { useToast } from "@/components/ToastProvider";
 import type {
   Campaign,
   CampaignDetail,
-  PipelineResult,
-  VoiceSelection,
+  Comment,
+  PresenceUser,
+  CollaborationEvent,
+  Script,
+  AudioFile,
 } from "@/lib/types";
-import ScriptReview from "@/components/ScriptReview";
-import VoiceInfoPanel from "@/components/VoiceInfoPanel";
-import AudioPlayer from "@/components/AudioPlayer";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { toast } = useToast();
+
+  const [authChecked, setAuthChecked] = useState(false);
+  const [username, setUsername] = useState("user");
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Auth check
+  // Collaboration state
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
+  const [activityEvents, setActivityEvents] = useState<CollaborationEvent[]>([]);
+  const [typingUser, setTypingUser] = useState<string | null>(null);
+  const collabWsRef = useRef<WebSocket | null>(null);
+
+  // Audio
+  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // ── Auth Check ──
   useEffect(() => {
     fetch("/api/auth/me")
       .then((res) => res.json())
       .then((data) => {
-        if (!data.authenticated) {
+        if (data.authenticated) {
+          setUsername(data.username || "user");
+          setAuthChecked(true);
+        } else {
           router.push("/login");
         }
       })
-      .catch(() => {
-        // Local dev -- allow
-      });
+      .catch(() => setAuthChecked(true));
   }, [router]);
 
-  // Load campaigns
+  // ── Load campaigns ──
   const loadCampaigns = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await fetch("/api/campaigns");
       if (res.ok) {
@@ -61,7 +81,7 @@ export default function DashboardPage() {
         setCampaigns(data.campaigns || []);
       }
     } catch {
-      // Silently fail
+      // silent
     } finally {
       setLoading(false);
     }
@@ -71,17 +91,56 @@ export default function DashboardPage() {
     loadCampaigns();
   }, [loadCampaigns]);
 
-  // Expand/collapse a campaign
+  // ── Load online users & activity ──
+  useEffect(() => {
+    const fetchPresence = async () => {
+      try {
+        const res = await fetch("/api/presence");
+        if (res.ok) {
+          const data = await res.json();
+          setOnlineUsers(data.users || []);
+        }
+      } catch { /* silent */ }
+    };
+    const fetchActivity = async () => {
+      try {
+        const res = await fetch("/api/activity?limit=15");
+        if (res.ok) {
+          const data = await res.json();
+          setActivityEvents(data.events || []);
+        }
+      } catch { /* silent */ }
+    };
+    fetchPresence();
+    fetchActivity();
+    const interval = setInterval(() => {
+      fetchPresence();
+      fetchActivity();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Toggle expand / collaboration WS ──
   const toggleExpand = async (id: string) => {
+    // Disconnect previous WS
+    if (collabWsRef.current) {
+      collabWsRef.current.close();
+      collabWsRef.current = null;
+    }
+
     if (expandedId === id) {
       setExpandedId(null);
       setDetail(null);
+      setComments([]);
+      setPresenceUsers([]);
       return;
     }
 
     setExpandedId(id);
     setDetailLoading(true);
     setDetail(null);
+    setComments([]);
+    setPresenceUsers([]);
 
     try {
       const res = await fetch(`/api/campaigns/${id}`);
@@ -89,17 +148,73 @@ export default function DashboardPage() {
         const data: CampaignDetail = await res.json();
         setDetail(data);
       }
-    } catch {
-      // Silently fail
-    } finally {
+    } catch { /* silent */ }
+    finally {
       setDetailLoading(false);
+    }
+
+    // Connect collaboration WebSocket
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/collaborate/${id}`;
+    const ws = new WebSocket(wsUrl);
+    collabWsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "init") {
+          setPresenceUsers(data.users || []);
+          setComments(data.comments || []);
+        } else if (data.type === "user_joined") {
+          setPresenceUsers((prev) => [...prev, data.user]);
+        } else if (data.type === "user_left") {
+          setPresenceUsers((prev) =>
+            prev.filter((u) => u.username !== data.username)
+          );
+        } else if (data.type === "comment_added") {
+          setComments((prev) => [...prev, data.comment]);
+        } else if (data.type === "comment_deleted") {
+          setComments((prev) =>
+            prev.filter((c) => c.id !== data.comment_id)
+          );
+        } else if (data.type === "typing") {
+          setTypingUser(data.username);
+          setTimeout(() => setTypingUser(null), 3000);
+        } else if (data.type === "activity") {
+          setActivityEvents((prev) => [data.event, ...prev].slice(0, 15));
+        }
+      } catch { /* ignore */ }
+    };
+  };
+
+  // ── Comments ──
+  const handleAddComment = async (text: string) => {
+    if (!expandedId) return;
+    try {
+      await fetch(`/api/campaigns/${expandedId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, username }),
+      });
+    } catch {
+      toast("error", "Failed to add comment");
     }
   };
 
-  // Delete a campaign
+  const handleDeleteComment = async (commentId: string) => {
+    if (!expandedId) return;
+    try {
+      await fetch(`/api/campaigns/${expandedId}/comments/${commentId}`, {
+        method: "DELETE",
+      });
+    } catch {
+      toast("error", "Failed to delete comment");
+    }
+  };
+
+  // ── Delete campaign ──
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete campaign "${name}"? This cannot be undone.`)) return;
-
     try {
       const res = await fetch(`/api/campaigns/${id}`, { method: "DELETE" });
       if (res.ok) {
@@ -108,218 +223,318 @@ export default function DashboardPage() {
           setExpandedId(null);
           setDetail(null);
         }
+        toast("success", `Campaign "${name}" deleted`);
       }
     } catch {
-      // Silently fail
+      toast("error", "Failed to delete campaign");
     }
   };
 
-  // Format date
-  const formatDate = (iso: string) => {
-    try {
-      const d = new Date(iso);
-      return d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return iso;
+  // ── Audio ──
+  const toggleAudio = (url: string) => {
+    if (playingAudio === url) {
+      audioRef.current?.pause();
+      setPlayingAudio(null);
+    } else {
+      if (audioRef.current) audioRef.current.pause();
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play();
+      audio.onended = () => setPlayingAudio(null);
+      setPlayingAudio(url);
     }
   };
 
-  // Extract result data for detail view
-  const resultData = detail?.result as PipelineResult | undefined;
-  const scripts = resultData?.final_scripts?.scripts || [];
-  const bestVariantId = resultData?.evaluation_round_1?.consensus?.best_variant_id;
-  const audioFiles = resultData?.audio?.audio_files || [];
-  const sessionId = resultData?.session_id || detail?.id || "";
-  const voiceUsed = resultData?.audio?.voice_used;
-  const voiceSelection = resultData?.voice_selection as VoiceSelection | undefined;
+  // ── Cleanup ──
+  useEffect(() => {
+    return () => {
+      if (collabWsRef.current) collabWsRef.current.close();
+    };
+  }, []);
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Filter campaigns
+  const filtered = searchQuery
+    ? campaigns.filter(
+      (c) =>
+        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.country?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.telco?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    : campaigns;
+
+  // Stats
+  const totalScripts = campaigns.reduce((s, c) => s + (c.script_count || 0), 0);
+  const totalAudio = campaigns.reduce(
+    (s, c) => s + (c.has_audio ? c.script_count || 1 : 0),
+    0
+  );
+
+  const scripts =
+    detail?.result?.final_scripts?.scripts ||
+    detail?.result?.revised_scripts_round_1?.scripts ||
+    detail?.result?.initial_scripts?.scripts ||
+    [];
+  const audioFiles = (detail?.result?.audio?.audio_files || []).filter(
+    (af: AudioFile) => af.file_name && !af.error
+  );
 
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="border-b border-[var(--card-border)] bg-[var(--card)]/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-white" />
-              </div>
-            </Link>
-            <div>
-              <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                <LayoutDashboard className="w-4 h-4 text-brand-400" />
-                Campaign Dashboard
-              </h1>
-              <p className="text-xs text-[var(--muted)]">
-                {campaigns.length} saved campaign{campaigns.length !== 1 ? "s" : ""}
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/"
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--card-border)] text-sm text-gray-400 hover:text-white hover:border-brand-500/30 transition-all"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            New Campaign
-          </Link>
+    <div className="min-h-screen px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-1">Dashboard</h1>
+          <p className="text-sm text-[var(--text-tertiary)]">
+            Manage campaigns and track team activity
+          </p>
         </div>
-      </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
-          </div>
-        ) : campaigns.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-[var(--card)] border border-[var(--card-border)] flex items-center justify-center mb-4">
-              <FolderOpen className="w-8 h-8 text-gray-500" />
+        {/* Stats */}
+        <div className="mb-8">
+          <StatsCards
+            campaignCount={campaigns.length}
+            scriptCount={totalScripts}
+            audioCount={totalAudio}
+            onlineUsers={onlineUsers.length}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Campaigns (2/3 width) */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" />
+              <input
+                type="text"
+                placeholder="Search campaigns..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 transition-colors"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">No campaigns yet</h2>
-            <p className="text-gray-400 mb-6">
-              Generate a campaign and save it to see it here.
-            </p>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-brand-600 text-white font-medium hover:bg-brand-500 transition-colors"
-            >
-              Generate Campaign
-            </Link>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {campaigns.map((campaign) => (
-              <div
-                key={campaign.id}
-                className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden"
-              >
-                {/* Campaign Row */}
-                <div
-                  className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-white/[0.02] transition-colors"
-                  onClick={() => toggleExpand(campaign.id)}
-                >
-                  <div className="flex items-center gap-4 min-w-0">
-                    <div className="shrink-0">
-                      {expandedId === campaign.id ? (
-                        <ChevronUp className="w-4 h-4 text-gray-500" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-gray-500" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-white truncate">
-                        {campaign.name}
-                      </h3>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-[var(--muted)]">
-                        <span className="flex items-center gap-1">
-                          <Globe className="w-3 h-3" />
-                          {campaign.country}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Radio className="w-3 h-3" />
-                          {campaign.telco}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <FileText className="w-3 h-3" />
-                          {campaign.script_count} scripts
-                        </span>
-                        {campaign.has_audio && (
-                          <span className="flex items-center gap-1 text-brand-400">
-                            <Volume2 className="w-3 h-3" />
-                            Audio
+
+            {/* Campaign list */}
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-12 text-gray-600">
+                {searchQuery
+                  ? "No campaigns match your search"
+                  : "No campaigns yet. Create one from the Home page."}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filtered.map((campaign) => (
+                  <div
+                    key={campaign.id}
+                    className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden hover:border-[var(--card-border-hover)] transition-all group"
+                  >
+                    {/* Header row */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer select-none"
+                      onClick={() => toggleExpand(campaign.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleExpand(campaign.id);
+                        }
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-sm font-medium text-[var(--text-primary)] truncate">
+                            {campaign.name}
+                          </h3>
+                          <PresenceBar
+                            users={
+                              expandedId === campaign.id ? presenceUsers : []
+                            }
+                            maxVisible={3}
+                          />
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
+                          {campaign.country && (
+                            <span className="flex items-center gap-1">
+                              <Globe className="w-3 h-3" />
+                              {campaign.country}
+                            </span>
+                          )}
+                          {campaign.telco && (
+                            <span className="flex items-center gap-1">
+                              <Building2 className="w-3 h-3" />
+                              {campaign.telco}
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            {new Date(campaign.created_at).toLocaleDateString()}
                           </span>
+                          <span className="flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            {campaign.script_count} scripts
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 ml-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(campaign.id, campaign.name);
+                          }}
+                          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        {expandedId === campaign.id ? (
+                          <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-4 shrink-0">
-                    <div className="text-right hidden sm:block">
-                      <p className="text-xs text-[var(--muted)] flex items-center gap-1">
-                        <User className="w-3 h-3" />
-                        {campaign.created_by}
-                      </p>
-                      <p className="text-xs text-[var(--muted)] flex items-center gap-1 mt-0.5">
-                        <Calendar className="w-3 h-3" />
-                        {formatDate(campaign.created_at)}
-                      </p>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(campaign.id, campaign.name);
-                      }}
-                      className="p-2 rounded-lg hover:bg-[var(--error)]/10 text-gray-500 hover:text-[var(--error)] transition-colors"
-                      title="Delete campaign"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Expanded Detail */}
-                {expandedId === campaign.id && (
-                  <div className="border-t border-[var(--card-border)] px-6 py-6">
-                    {detailLoading ? (
-                      <div className="flex items-center justify-center py-10">
-                        <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
-                      </div>
-                    ) : detail && resultData ? (
-                      <div className="space-y-6">
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                          {/* Scripts */}
-                          <div className="p-4 rounded-xl bg-[var(--background)] border border-[var(--card-border)]">
-                            <ScriptReview
-                              scripts={scripts}
-                              bestVariantId={bestVariantId}
-                              sessionId={sessionId}
-                            />
+                    {/* Expanded detail */}
+                    {expandedId === campaign.id && (
+                      <div className="px-5 pb-5 border-t border-[var(--card-border)] animate-fade-in">
+                        {detailLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="w-5 h-5 text-brand-500 animate-spin" />
                           </div>
-
-                          {/* Voice & Audio */}
-                          <div className="space-y-4">
-                            {voiceSelection && (
-                              <div className="p-4 rounded-xl bg-[var(--background)] border border-[var(--card-border)]">
-                                <VoiceInfoPanel voiceSelection={voiceSelection} />
+                        ) : detail ? (
+                          <div className="space-y-4 mt-4">
+                            {/* Scripts */}
+                            {scripts.length > 0 && (
+                              <div>
+                                <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
+                                  <FileText className="w-3 h-3 text-[var(--accent)]" />
+                                  Scripts
+                                </h4>
+                                <div className="space-y-2">
+                                  {scripts.map(
+                                    (
+                                      script: Script,
+                                      idx: number
+                                    ) => (
+                                      <div
+                                        key={idx}
+                                        className="p-3 rounded-xl bg-[var(--background)] border border-[var(--card-border)]"
+                                      >
+                                        <div className="flex items-center justify-between mb-2">
+                                          <span className="text-xs font-medium text-[var(--text-primary)]">
+                                            Variant{" "}
+                                            {script.variant_id ||
+                                              idx + 1}
+                                          </span>
+                                          <span className="text-[10px] text-gray-600">
+                                            {script.word_count ||
+                                              "?"}{" "}
+                                            words
+                                          </span>
+                                        </div>
+                                        {script.full_script && (
+                                          <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-3">
+                                            {script.full_script}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )
+                                  )}
+                                </div>
                               </div>
                             )}
+
+                            {/* Audio */}
                             {audioFiles.length > 0 && (
-                              <div className="p-4 rounded-xl bg-[var(--background)] border border-[var(--card-border)]">
-                                <AudioPlayer
-                                  sessionId={sessionId}
-                                  audioFiles={audioFiles}
-                                  voiceInfo={
-                                    voiceUsed
-                                      ? {
-                                          name: voiceUsed.name,
-                                          voice_id: voiceUsed.voice_id,
-                                          settings: voiceUsed.settings,
-                                        }
-                                      : undefined
-                                  }
-                                />
+                              <div>
+                                <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
+                                  <Volume2 className="w-3 h-3 text-[var(--accent)]" />
+                                  Audio
+                                </h4>
+                                <div className="flex flex-wrap gap-2">
+                                  {audioFiles.map(
+                                    (
+                                      af: AudioFile,
+                                      i: number
+                                    ) => {
+                                      const audioSessionId = detail?.result?.audio?.session_id || detail?.result?.session_id || "";
+                                      const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
+                                      return (
+                                        <div
+                                          key={i}
+                                          className="flex items-center gap-2 p-2 rounded-lg bg-[var(--background)] border border-[var(--card-border)]"
+                                        >
+                                          <button
+                                            onClick={() => toggleAudio(audioUrl)}
+                                            className={`p-1.5 rounded-lg ${playingAudio === audioUrl
+                                              ? "bg-brand-500 text-white"
+                                              : "text-gray-400 hover:text-white"
+                                              }`}
+                                          >
+                                            <Play className="w-3 h-3" />
+                                          </button>
+                                          <span className="text-[10px] text-gray-400 max-w-[100px] truncate">
+                                            {af.file_name}
+                                          </span>
+                                          <a
+                                            href={audioUrl}
+                                            download
+                                            className="p-1 text-gray-600 hover:text-white"
+                                          >
+                                            <Download className="w-3 h-3" />
+                                          </a>
+                                        </div>
+                                      );
+                                    }
+                                  )}
+                                </div>
                               </div>
                             )}
+
+                            {/* Comments */}
+                            <div className="pt-3 border-t border-[var(--card-border)]">
+                              <CommentThread
+                                comments={comments}
+                                onAddComment={handleAddComment}
+                                onDeleteComment={handleDeleteComment}
+                                currentUser={username}
+                                typingUser={typingUser}
+                              />
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <p className="text-xs text-gray-600 py-4 text-center">
+                            Failed to load campaign details.
+                          </p>
+                        )}
                       </div>
-                    ) : (
-                      <p className="text-sm text-[var(--muted)] text-center py-4">
-                        Failed to load campaign details.
-                      </p>
                     )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </main>
+
+          {/* Sidebar: Activity Feed (1/3 width) */}
+          <div className="space-y-4">
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] sticky top-8">
+              <ActivityFeed events={activityEvents} maxItems={15} />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

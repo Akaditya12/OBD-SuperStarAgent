@@ -61,6 +61,9 @@ const TELCOS: Record<string, string[]> = {
   Philippines: ["Globe", "Smart", "DITO"],
 };
 
+const selectClass =
+  "w-full px-4 py-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/20 transition-all appearance-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+
 export default function CountryTelcoSelect({
   country,
   telco,
@@ -75,9 +78,10 @@ export default function CountryTelcoSelect({
     <div className="space-y-5">
       {/* Country */}
       <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-          <Globe className="w-4 h-4 text-brand-400" />
+        <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-2">
+          <Globe className="w-4 h-4 text-[var(--accent)]" />
           Target Country
+          <span className="text-[var(--error)]">*</span>
         </label>
         <select
           value={country}
@@ -85,7 +89,7 @@ export default function CountryTelcoSelect({
             onCountryChange(e.target.value);
             onTelcoChange("");
           }}
-          className="w-full px-4 py-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)] text-sm text-gray-200 focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20 transition-all appearance-none cursor-pointer"
+          className={selectClass}
         >
           <option value="">Select a country...</option>
           {COUNTRIES.map((c) => (
@@ -98,15 +102,16 @@ export default function CountryTelcoSelect({
 
       {/* Telco */}
       <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-          <Radio className="w-4 h-4 text-brand-400" />
+        <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-2">
+          <Radio className="w-4 h-4 text-[var(--accent)]" />
           Telco Operator
+          <span className="text-[var(--error)]">*</span>
         </label>
         <select
           value={telco}
           onChange={(e) => onTelcoChange(e.target.value)}
           disabled={!country}
-          className="w-full px-4 py-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)] text-sm text-gray-200 focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20 transition-all appearance-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          className={selectClass}
         >
           <option value="">
             {country ? "Select a telco..." : "Select a country first"}
@@ -121,17 +126,17 @@ export default function CountryTelcoSelect({
 
       {/* Language override */}
       <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-          <Languages className="w-4 h-4 text-brand-400" />
+        <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-2">
+          <Languages className="w-4 h-4 text-[var(--accent)]" />
           Language Override{" "}
-          <span className="text-xs text-[var(--muted)]">(optional)</span>
+          <span className="text-xs text-[var(--text-tertiary)]">(optional)</span>
         </label>
         <input
           type="text"
           value={language}
           onChange={(e) => onLanguageChange(e.target.value)}
-          placeholder="Auto-detected from market analysis (e.g., French, Swahili, Amharic)"
-          className="w-full px-4 py-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)] text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20 transition-all"
+          placeholder="Auto-detected from market analysis (e.g., French, Swahili)"
+          className="w-full px-4 py-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/20 transition-all"
         />
       </div>
     </div>

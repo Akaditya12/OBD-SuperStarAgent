@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from typing import Any, Callable, Awaitable
 
@@ -88,11 +90,41 @@ class PipelineOrchestrator:
             )
 
         try:
-            # ── Step 1: Product Analysis ──
+            pipeline_start = time.monotonic()
+
+            # ── Steps 1 & 2: Product Analysis + Market Research (PARALLEL) ──
             await self.on_progress("ProductAnalyzer", "started", {
                 "message": "Analyzing product documentation..."
             })
-            product_brief = await self.product_analyzer.run(product_text=product_text)
+            await self.on_progress("MarketResearcher", "started", {
+                "message": f"Researching market: {country} / {telco}..."
+            })
+
+            async def _run_product_analysis() -> dict[str, Any]:
+                t0 = time.monotonic()
+                brief = await self.product_analyzer.run(product_text=product_text)
+                elapsed = time.monotonic() - t0
+                logger.info(f"[ProductAnalyzer] completed in {elapsed:.1f}s")
+                return brief
+
+            async def _run_market_research() -> dict[str, Any]:
+                t0 = time.monotonic()
+                # Market research doesn't need product_brief -- it uses country/telco
+                # We pass a minimal brief so it has product context
+                analysis = await self.market_researcher.run(
+                    country=country,
+                    telco=telco,
+                    product_brief={"product_name": "pending", "description": product_text[:500]},
+                )
+                elapsed = time.monotonic() - t0
+                logger.info(f"[MarketResearcher] completed in {elapsed:.1f}s")
+                return analysis
+
+            product_brief, market_analysis = await asyncio.gather(
+                _run_product_analysis(),
+                _run_market_research(),
+            )
+
             results["product_brief"] = product_brief
             await self.on_progress("ProductAnalyzer", "completed", {
                 "message": f"Product analyzed: {product_brief.get('product_name', 'Unknown')}",
@@ -101,15 +133,6 @@ class PipelineOrchestrator:
                 "user_prompt": self.product_analyzer.last_user_prompt,
             })
 
-            # ── Step 2: Market Research ──
-            await self.on_progress("MarketResearcher", "started", {
-                "message": f"Researching market: {country} / {telco}..."
-            })
-            market_analysis = await self.market_researcher.run(
-                country=country,
-                telco=telco,
-                product_brief=product_brief,
-            )
             results["market_analysis"] = market_analysis
             await self.on_progress("MarketResearcher", "completed", {
                 "message": "Market analysis complete",
@@ -195,36 +218,35 @@ class PipelineOrchestrator:
             })
 
             # ── Step 7: Audio Production ──
-            has_elevenlabs_key = bool(ELEVENLABS_API_KEY and not ELEVENLABS_API_KEY.startswith("sk-dummy"))
-            if has_elevenlabs_key:
-                await self.on_progress("AudioProducer", "started", {
-                    "message": "Generating audio recordings via ElevenLabs V3..."
-                })
-                try:
-                    audio_result = await self.audio_producer.run(
-                        scripts=final_scripts,
-                        voice_selection=voice_selection,
-                        session_id=session_id,
-                    )
-                    results["audio"] = audio_result
-                    successful = audio_result.get("summary", {}).get("total_generated", 0)
-                    await self.on_progress("AudioProducer", "completed", {
-                        "message": f"Generated {successful} audio recordings",
-                        "data": {"summary": audio_result.get("summary", {})},
-                    })
-                except Exception as audio_err:
-                    logger.error(f"Audio production failed: {audio_err}")
-                    await self.on_progress("AudioProducer", "completed", {
-                        "message": f"Audio generation failed: {str(audio_err)}. Scripts are still available.",
-                    })
-            else:
+            await self.on_progress("AudioProducer", "started", {
+                "message": "Generating audio recordings..."
+            })
+            try:
+                audio_result = await self.audio_producer.run(
+                    scripts=final_scripts,
+                    voice_selection=voice_selection,
+                    session_id=session_id,
+                    country=country,
+                    language=language,
+                )
+                results["audio"] = audio_result
+                successful = audio_result.get("summary", {}).get("total_generated", 0)
+                engine = audio_result.get("tts_engine", "unknown")
                 await self.on_progress("AudioProducer", "completed", {
-                    "message": "Skipped -- add a valid ELEVENLABS_API_KEY to .env to enable audio generation",
+                    "message": f"Generated {successful} audio files via {engine}",
+                    "data": {"summary": audio_result.get("summary", {})},
+                })
+            except Exception as audio_err:
+                logger.error(f"Audio production failed: {audio_err}")
+                await self.on_progress("AudioProducer", "completed", {
+                    "message": f"Audio generation failed: {str(audio_err)}. Scripts are still available.",
                 })
 
             # ── Pipeline Complete ──
+            total_time = time.monotonic() - pipeline_start
+            logger.info(f"Pipeline completed in {total_time:.1f}s")
             await self.on_progress("Pipeline", "completed", {
-                "message": "Pipeline complete! Scripts and voice recommendation are ready.",
+                "message": f"Pipeline complete in {total_time:.0f}s! Scripts and voice recommendation are ready.",
                 "session_id": session_id,
             })
 

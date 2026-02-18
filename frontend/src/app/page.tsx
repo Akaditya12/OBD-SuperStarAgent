@@ -1,53 +1,109 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Zap,
-  ArrowRight,
-  ArrowLeft,
-  Rocket,
-  Sparkles,
-  Settings2,
-  Mic2,
-  LogOut,
-  Loader2,
+  Play,
+  FileText,
+  Volume2,
+  Download,
   Save,
   CheckCircle2,
-  LayoutDashboard,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Zap,
+  ArrowRight,
+  RotateCcw,
+  Copy,
+  Check,
 } from "lucide-react";
 import ProductUpload from "@/components/ProductUpload";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
-import PipelineProgress, {
-  type ProgressStep,
-} from "@/components/PipelineProgress";
-import ScriptReview from "@/components/ScriptReview";
-import AudioPlayer from "@/components/AudioPlayer";
+import PipelineProgress from "@/components/PipelineProgress";
+import type { ProgressStep } from "@/components/PipelineProgress";
+import ProductPresets, { BNG_PRODUCTS } from "@/components/ProductPresets";
+import type { ProductPreset } from "@/components/ProductPresets";
+import PromotionTypeSelect, { PROMOTION_TYPES } from "@/components/PromotionTypeSelect";
+import type { PromotionType } from "@/components/PromotionTypeSelect";
 import VoiceInfoPanel from "@/components/VoiceInfoPanel";
-import type { PipelineResult, VoiceSelection, WsProgressMessage } from "@/lib/types";
+import { useToast } from "@/components/ToastProvider";
+import type {
+  PipelineResult,
+  WsProgressMessage,
+  Script,
+  AudioFile,
+} from "@/lib/types";
 
-// Pipeline step definitions
-const PIPELINE_STEPS: Omit<ProgressStep, "status" | "message">[] = [
+type WizardStep = "input" | "running" | "results";
+
+const PIPELINE_STEPS: { agent: string; label: string }[] = [
   { agent: "ProductAnalyzer", label: "Product Analysis" },
   { agent: "MarketResearcher", label: "Market Research" },
-  { agent: "ScriptWriter", label: "Script Generation" },
+  { agent: "ScriptWriter", label: "Script Writing" },
   { agent: "EvalPanel", label: "Evaluation Panel" },
-  { agent: "ScriptWriter", label: "Script Revision" },
+  { agent: "ScriptWriter_Revision", label: "Script Revision" },
   { agent: "VoiceSelector", label: "Voice Selection" },
   { agent: "AudioProducer", label: "Audio Production" },
 ];
 
-type WizardStep = "input" | "running" | "results";
-
-export default function Home() {
+export default function HomePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { toast } = useToast();
 
-  // Auth state
+  // Auth
   const [authChecked, setAuthChecked] = useState(false);
-  const [username, setUsername] = useState<string | null>(null);
+  const [username, setUsername] = useState("user");
 
-  // Check auth on mount
+  // Form
+  const [selectedProduct, setSelectedProduct] = useState("eva");
+  const [productText, setProductText] = useState(BNG_PRODUCTS[0].fullDescription);
+  const [fileName, setFileName] = useState("");
+  const [country, setCountry] = useState("");
+  const [telco, setTelco] = useState("");
+  const [language, setLanguage] = useState("");
+  const [promotionType, setPromotionType] = useState("obd_standard");
+
+  // Handle ?product= URL param from sidebar clicks
+  useEffect(() => {
+    const productParam = searchParams.get("product");
+    if (productParam) {
+      const found = BNG_PRODUCTS.find((p) => p.id === productParam);
+      if (found && found.id !== "custom") {
+        setSelectedProduct(found.id);
+        setProductText(found.fullDescription);
+        setFileName("");
+        setWizardStep("input");
+      }
+    }
+  }, [searchParams]);
+
+  // Wizard
+  const [wizardStep, setWizardStep] = useState<WizardStep>("input");
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>(
+    PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
+  );
+  const [result, setResult] = useState<PipelineResult | null>(null);
+  const [error, setError] = useState("");
+
+  // Save
+  const [campaignName, setCampaignName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Audio
+  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Script expand
+  const [expandedScript, setExpandedScript] = useState<number | null>(null);
+  const [copiedScript, setCopiedScript] = useState<number | null>(null);
+
+  // WebSocket ref
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // ── Auth Check ──
   useEffect(() => {
     fetch("/api/auth/me")
       .then((res) => res.json())
@@ -60,40 +116,161 @@ export default function Home() {
         }
       })
       .catch(() => {
-        // Backend not reachable or auth not enabled -- allow access (local dev)
         setAuthChecked(true);
       });
   }, [router]);
 
-  const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
+  // ── Update Step helper ──
+  const updateStep = useCallback(
+    (agent: string, status: string, message: string) => {
+      setProgressSteps((prev) =>
+        prev.map((s) =>
+          s.agent === agent
+            ? { ...s, status: status as ProgressStep["status"], message }
+            : s
+        )
+      );
+    },
+    []
+  );
+
+  // ── WebSocket for pipeline progress ──
+  const connectProgressWs = useCallback(
+    (sessionId: string) => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/ws/progress/${sessionId}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const data: WsProgressMessage = JSON.parse(event.data);
+
+          if (data.status === "done" || data.status === "error") {
+            if (data.status === "done" && data.result) {
+              setResult(data.result as PipelineResult);
+              setWizardStep("results");
+              localStorage.removeItem("obd_active_session");
+              toast("success", "Campaign generated successfully!");
+            } else if (data.status === "error") {
+              setError(data.message || "Pipeline failed");
+              setWizardStep("results");
+              localStorage.removeItem("obd_active_session");
+              toast("error", data.message || "Pipeline failed");
+            }
+          } else {
+            updateStep(
+              data.agent || "",
+              data.status || "",
+              data.message || ""
+            );
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onerror = () => {
+        setError("Connection lost. Check pipeline status.");
+        toast("warning", "WebSocket connection lost");
+      };
+    },
+    [updateStep, toast]
+  );
+
+  // ── Resume pipeline on mount ──
+  useEffect(() => {
+    const activeSession = localStorage.getItem("obd_active_session");
+    if (!activeSession) return;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/generate/${activeSession}/status`);
+        if (!res.ok) {
+          localStorage.removeItem("obd_active_session");
+          return;
+        }
+        const data = await res.json();
+        if (data.status === "done" && data.result) {
+          setResult(data.result);
+          setWizardStep("results");
+          localStorage.removeItem("obd_active_session");
+          if (data.progress) {
+            for (const msg of data.progress) {
+              updateStep(msg.agent || "", msg.status || "", msg.message || "");
+            }
+          }
+        } else if (data.status === "error") {
+          setError(data.error || "Pipeline failed");
+          setWizardStep("results");
+          localStorage.removeItem("obd_active_session");
+        } else {
+          setWizardStep("running");
+          if (data.progress) {
+            for (const msg of data.progress) {
+              updateStep(msg.agent || "", msg.status || "", msg.message || "");
+            }
+          }
+          connectProgressWs(activeSession);
+        }
+      } catch {
+        localStorage.removeItem("obd_active_session");
+      }
+    })();
+  }, [connectProgressWs, updateStep]);
+
+  // ── Start pipeline ──
+  const handleStart = async () => {
+    if (!productText.trim() || !country || !telco) {
+      toast("warning", "Please fill in all required fields");
+      return;
+    }
+
+    setWizardStep("running");
+    setError("");
+    setResult(null);
+    setSaved(false);
+    setProgressSteps(
+      PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
+    );
+
+    try {
+      const promoType = PROMOTION_TYPES.find((t) => t.id === promotionType);
+      const promoGuidance = promoType
+        ? `\n\n--- PROMOTION TYPE: ${promoType.name} ---\n${promoType.scriptGuidance}`
+        : "";
+      const fullProductText = productText + promoGuidance;
+
+      const res = await fetch("/api/generate/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_text: fullProductText,
+          country,
+          telco,
+          language: language || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setError(err.error || "Failed to start pipeline");
+        setWizardStep("input");
+        toast("error", "Failed to start pipeline");
+        return;
+      }
+
+      const { session_id } = await res.json();
+      localStorage.setItem("obd_active_session", session_id);
+      connectProgressWs(session_id);
+    } catch (e) {
+      setError("Network error. Please try again.");
+      setWizardStep("input");
+      toast("error", "Network error");
+    }
   };
 
-  // Form state
-  const [productText, setProductText] = useState("");
-  const [fileName, setFileName] = useState("");
-  const [country, setCountry] = useState("");
-  const [telco, setTelco] = useState("");
-  const [language, setLanguage] = useState("");
-  const [provider, setProvider] = useState("azure_openai");
-
-  // Pipeline state
-  const [wizardStep, setWizardStep] = useState<WizardStep>("input");
-  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>(
-    PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
-  );
-  const [result, setResult] = useState<PipelineResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-
-  // Save campaign state
-  const [campaignName, setCampaignName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const canStart = productText.trim() && country && telco;
-
+  // ── Save campaign ──
   const handleSaveCampaign = async () => {
     if (!campaignName.trim() || !result?.session_id) return;
     setSaving(true);
@@ -108,554 +285,481 @@ export default function Home() {
       });
       if (res.ok) {
         setSaved(true);
+        toast("success", "Campaign saved!");
+      } else {
+        toast("error", "Failed to save campaign");
       }
     } catch {
-      // Silently fail
+      toast("error", "Failed to save campaign");
     } finally {
       setSaving(false);
     }
   };
 
-  // Track which step index we're on for progress updates
-  const stepIndexRef = useRef(0);
+  // ── Audio playback ──
+  const toggleAudio = (url: string) => {
+    if (playingAudio === url) {
+      audioRef.current?.pause();
+      setPlayingAudio(null);
+    } else {
+      if (audioRef.current) audioRef.current.pause();
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play();
+      audio.onended = () => setPlayingAudio(null);
+      setPlayingAudio(url);
+    }
+  };
 
-  const updateStep = useCallback(
-    (
-      agent: string,
-      status: ProgressStep["status"],
-      message: string,
-      wsData?: Record<string, unknown>
-    ) => {
-      setProgressSteps((prev) => {
-        const updated = [...prev];
-        // Find the next matching agent step that hasn't been completed
-        let targetIdx = -1;
-        for (let i = 0; i < updated.length; i++) {
-          if (
-            updated[i].agent === agent &&
-            updated[i].status !== "completed"
-          ) {
-            targetIdx = i;
-            break;
-          }
-        }
-        if (targetIdx >= 0) {
-          // Extract prompts and data from the WS payload
-          const systemPrompt = wsData?.system_prompt as string | undefined;
-          const userPrompt = wsData?.user_prompt as string | undefined;
-          // data = everything except the prompt fields
-          const agentData = wsData
-            ? Object.fromEntries(
-                Object.entries(wsData).filter(
-                  ([k]) => k !== "system_prompt" && k !== "user_prompt"
-                )
-              )
-            : undefined;
+  // ── Copy script ──
+  const copyScript = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedScript(idx);
+    toast("info", "Script copied to clipboard");
+    setTimeout(() => setCopiedScript(null), 2000);
+  };
 
-          updated[targetIdx] = {
-            ...updated[targetIdx],
-            status,
-            message,
-            ...(status === "completed" && agentData && Object.keys(agentData).length > 0
-              ? { data: agentData }
-              : {}),
-            ...(status === "completed" && systemPrompt
-              ? { systemPrompt }
-              : {}),
-            ...(status === "completed" && userPrompt ? { userPrompt } : {}),
-          };
-        }
-        return updated;
-      });
-    },
-    []
-  );
-
-  // Connect to the read-only progress WebSocket for a given session
-  const connectProgressWs = useCallback(
-    (sessionId: string) => {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws/progress/${sessionId}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        try {
-          const data: WsProgressMessage = JSON.parse(event.data);
-          const { agent, status, message } = data;
-
-          if (agent === "Pipeline" && status === "done") {
-            const pipelineResult = (data.result || {}) as PipelineResult;
-            setResult(pipelineResult);
-            setWizardStep("results");
-            localStorage.removeItem("obd_active_session");
-            return;
-          }
-
-          if (agent === "Pipeline" && status === "error") {
-            setError(message || "Pipeline failed");
-            if (data.result) {
-              setResult(data.result as PipelineResult);
-            }
-            setWizardStep("results");
-            localStorage.removeItem("obd_active_session");
-            return;
-          }
-
-          if (agent && status) {
-            updateStep(
-              agent,
-              status as ProgressStep["status"],
-              message || "",
-              data.data as Record<string, unknown> | undefined
-            );
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      };
-
-      ws.onerror = () => {
-        setError(
-          "WebSocket connection failed. Make sure the backend is running."
-        );
-      };
-
-      ws.onclose = () => {
-        wsRef.current = null;
-      };
-    },
-    [updateStep]
-  );
-
-  const startPipeline = useCallback(async () => {
-    setWizardStep("running");
-    setError(null);
+  // ── Reset ──
+  const handleReset = () => {
+    setWizardStep("input");
     setResult(null);
-    stepIndexRef.current = 0;
+    setError("");
+    setSaved(false);
+    setCampaignName("");
     setProgressSteps(
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
+    if (wsRef.current) wsRef.current.close();
+  };
 
-    try {
-      const res = await fetch("/api/generate/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          product_text: productText,
-          country,
-          telco,
-          language: language || undefined,
-          provider: provider || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        setError(err.error || "Failed to start pipeline");
-        return;
-      }
-
-      const { session_id } = await res.json();
-      localStorage.setItem("obd_active_session", session_id);
-      connectProgressWs(session_id);
-    } catch {
-      setError(
-        "Failed to start pipeline. Make sure the backend is running on port 8000."
-      );
-    }
-  }, [productText, country, telco, language, provider, connectProgressWs]);
-
-  // Resume an active pipeline on mount (e.g. after navigating back)
-  useEffect(() => {
-    const activeSession = localStorage.getItem("obd_active_session");
-    if (!activeSession) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch(`/api/generate/${activeSession}/status`);
-        if (!res.ok) {
-          localStorage.removeItem("obd_active_session");
-          return;
-        }
-        const data = await res.json();
-        if (cancelled) return;
-
-        if (data.status === "done" && data.result) {
-          setResult(data.result as PipelineResult);
-          setWizardStep("results");
-          localStorage.removeItem("obd_active_session");
-        } else if (data.status === "error") {
-          setError(data.error || "Pipeline failed");
-          if (data.result) setResult(data.result as PipelineResult);
-          setWizardStep("results");
-          localStorage.removeItem("obd_active_session");
-        } else if (data.status === "running") {
-          // Replay buffered progress into the UI
-          setWizardStep("running");
-          setProgressSteps(
-            PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
-          );
-          for (const msg of data.progress || []) {
-            if (msg.agent && msg.status && msg.agent !== "Pipeline") {
-              updateStep(
-                msg.agent,
-                msg.status as ProgressStep["status"],
-                msg.message || "",
-                msg.data as Record<string, unknown> | undefined
-              );
-            }
-          }
-          connectProgressWs(activeSession);
-        }
-      } catch {
-        localStorage.removeItem("obd_active_session");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [connectProgressWs, updateStep]);
-
-  // Cleanup WebSocket on unmount -- just disconnect the viewer, pipeline keeps running
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-    };
-  }, []);
-
-  // Extract data from results (typed via PipelineResult)
-  const scripts = result?.final_scripts?.scripts || [];
-  const bestVariantId = result?.evaluation_round_1?.consensus?.best_variant_id;
-  const audioFiles = result?.audio?.audio_files || [];
-  const sessionId = result?.session_id || "";
-  const voiceUsed = result?.audio?.voice_used;
-  const voiceSelection = result?.voice_selection as VoiceSelection | undefined;
-
-  // Show loading while checking auth
+  // Wait for auth
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
+        <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
+  // Extract scripts and audio from result
+  const scripts =
+    result?.final_scripts?.scripts ||
+    result?.revised_scripts_round_1?.scripts ||
+    result?.initial_scripts?.scripts ||
+    [];
+  const audioFiles = (result?.audio?.audio_files || []).filter(
+    (af: AudioFile) => af.file_name && !af.error
+  );
+  const voiceSelection = result?.voice_selection;
+
+  const WIZARD_LABELS = ["Configure", "Generate", "Results"];
+
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="border-b border-[var(--card-border)] bg-[var(--card)]/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center">
-              <Zap className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-white">
-                OBD SuperStar Agent
-              </h1>
-              <p className="text-xs text-[var(--muted)]">
-                AI-Powered OBD Script & Audio Generator
-              </p>
-            </div>
-          </div>
-
-          {/* Dashboard + Provider selector + User menu */}
-          <div className="flex items-center gap-3">
-            <Link
-              href="/dashboard"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              Dashboard
-            </Link>
-            <div className="flex items-center gap-2">
-              <Settings2 className="w-4 h-4 text-gray-500" />
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className="text-xs px-2 py-1 rounded-lg bg-[var(--card)] border border-[var(--card-border)] text-gray-400 focus:outline-none"
-              >
-                <option value="azure_openai">GPT-5.1 (Azure OpenAI)</option>
-              </select>
-            </div>
-
-            {username && (
-              <div className="flex items-center gap-2 pl-3 border-l border-[var(--card-border)]">
-                <span className="text-xs text-gray-400">{username}</span>
-                <button
-                  onClick={handleLogout}
-                  className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
-                  title="Sign out"
+    <div className="min-h-screen px-4 sm:px-6 lg:px-8 py-8 max-w-5xl mx-auto">
+      {/* ── Step Indicator ── */}
+      <div className="flex items-center justify-center gap-2 mb-10">
+        {WIZARD_LABELS.map((label, i) => {
+          const stepIndex =
+            wizardStep === "input" ? 0 : wizardStep === "running" ? 1 : 2;
+          const isActive = i === stepIndex;
+          const isComplete = i < stepIndex;
+          return (
+            <div key={label} className="flex items-center gap-2">
+              {i > 0 && (
+                <div
+                  className={`w-8 h-px transition-colors ${isComplete ? "bg-[var(--accent)]" : "bg-[var(--card-border)]"}`}
+                />
+              )}
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all ${isActive
+                    ? "bg-[var(--accent)] text-white glow-brand"
+                    : isComplete
+                      ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
+                      : "bg-[var(--card)] text-[var(--text-tertiary)]"
+                    }`}
                 >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
+                  {isComplete ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  ) : (
+                    i + 1
+                  )}
+                </div>
+                <span
+                  className={`text-xs font-medium hidden sm:inline ${isActive
+                    ? "text-[var(--text-primary)]"
+                    : isComplete
+                      ? "text-[var(--text-secondary)]"
+                      : "text-[var(--text-tertiary)]"
+                    }`}
+                >
+                  {label}
+                </span>
               </div>
-            )}
-          </div>
-        </div>
-      </header>
+            </div>
+          );
+        })}
+      </div>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* ── INPUT STEP ── */}
-        {wizardStep === "input" && (
-          <div className="animate-fade-in">
-            {/* Hero */}
-            <div className="text-center mb-10">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs mb-4">
-                <Sparkles className="w-3 h-3" />
-                Multi-Agent AI Pipeline
-              </div>
-              <h2 className="text-3xl font-bold text-white mb-3">
-                Generate OBD Scripts & Audio
-              </h2>
-              <p className="text-gray-400 max-w-lg mx-auto">
-                Upload your product documentation, select the target market, and
-                let our 6-agent AI pipeline create culturally-relevant OBD
-                scripts with professional audio recordings.
-              </p>
+      {/* ── INPUT STEP ── */}
+      {wizardStep === "input" && (
+        <div className="animate-fade-in">
+          {/* Hero */}
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] text-xs font-medium mb-4 border border-[var(--accent)]/20">
+              <Sparkles className="w-3.5 h-3.5" />
+              AI-Powered 6-Agent Pipeline
+            </div>
+            <h1 className="text-3xl sm:text-4xl font-bold mb-3">
+              <span className="gradient-text">Generate OBD Campaigns</span>
+            </h1>
+            <p className="text-[var(--text-tertiary)] text-sm max-w-md mx-auto">
+              Create culturally-relevant promotional scripts and audio with our
+              multi-agent AI system.
+            </p>
+          </div>
+
+          {/* Form */}
+          <div className="max-w-2xl mx-auto space-y-5">
+            {/* BNG Product Presets */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
+              <ProductPresets
+                selectedProduct={selectedProduct}
+                onSelect={(product: ProductPreset) => {
+                  setSelectedProduct(product.id);
+                  if (product.id !== "custom" && product.fullDescription) {
+                    setProductText(product.fullDescription);
+                    setFileName("");
+                  } else if (product.id === "custom") {
+                    setProductText("");
+                    setFileName("");
+                  }
+                }}
+              />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Left: Product upload */}
-              <div className="space-y-6">
-                <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                  <ProductUpload
-                    value={productText}
-                    onChange={setProductText}
-                    fileName={fileName}
-                    onFileNameChange={setFileName}
-                  />
-                </div>
-              </div>
+            {/* Product upload / paste (always visible for editing or custom) */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
+              <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-3">
+                <FileText className="w-4 h-4 text-[var(--accent)]" />
+                Product Documentation
+                <span className="text-[var(--error)]">*</span>
+                {selectedProduct !== "custom" && (
+                  <span className="text-[10px] text-[var(--text-tertiary)] ml-1">
+                    (auto-filled from preset — edit freely)
+                  </span>
+                )}
+              </label>
+              <ProductUpload
+                value={productText}
+                onChange={(text) => {
+                  setProductText(text);
+                  if (selectedProduct !== "custom") setSelectedProduct("custom");
+                }}
+                fileName={fileName}
+                onFileNameChange={setFileName}
+              />
+            </div>
 
-              {/* Right: Country & Telco */}
-              <div className="space-y-6">
-                <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                  <CountryTelcoSelect
-                    country={country}
-                    telco={telco}
-                    language={language}
-                    onCountryChange={setCountry}
-                    onTelcoChange={setTelco}
-                    onLanguageChange={setLanguage}
-                  />
-                </div>
-              </div>
+            {/* Promotion Type */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
+              <PromotionTypeSelect
+                selected={promotionType}
+                onChange={(type: PromotionType) => setPromotionType(type.id)}
+              />
+            </div>
+
+            {/* Country, Telco, Language */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
+              <CountryTelcoSelect
+                country={country}
+                telco={telco}
+                language={language}
+                onCountryChange={setCountry}
+                onTelcoChange={setTelco}
+                onLanguageChange={setLanguage}
+              />
             </div>
 
             {/* Start button */}
-            <div className="flex justify-center mt-10">
-              <button
-                onClick={startPipeline}
-                disabled={!canStart}
-                className="group flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-brand-600 to-brand-700 text-white font-semibold text-lg shadow-lg shadow-brand-500/20 hover:shadow-brand-500/30 hover:from-brand-500 hover:to-brand-600 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none"
-              >
-                <Rocket className="w-5 h-5" />
-                Generate OBD Campaign
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
+            <button
+              onClick={handleStart}
+              disabled={!productText.trim() || !country || !telco}
+              className="w-full py-3.5 rounded-2xl text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed glow-brand"
+              style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}
+            >
+              <Zap className="w-4 h-4" />
+              Generate Campaign
+              <ArrowRight className="w-4 h-4" />
+            </button>
 
-            {!canStart && (
-              <p className="text-center text-xs text-[var(--muted)] mt-3">
-                Please provide product documentation and select a country and
-                telco to continue.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* ── RUNNING STEP ── */}
-        {wizardStep === "running" && (
-          <div className="animate-fade-in">
-            <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-white mb-2">
-                Pipeline Running
-              </h2>
-              <p className="text-gray-400">
-                {country} / {telco} &mdash; Click &quot;View Output&quot; on each completed agent to review its results
-              </p>
-            </div>
-
-            <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-              <PipelineProgress steps={progressSteps} />
-            </div>
-
-            {error && (
-              <div className="mt-6 p-4 rounded-xl bg-[var(--error)]/10 border border-[var(--error)]/20">
-                <p className="text-sm text-[var(--error)]">{error}</p>
-                <button
-                  onClick={() => setWizardStep("input")}
-                  className="mt-3 flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to input
-                </button>
+            {/* BNG Stats Bar */}
+            <div className="flex items-center justify-center gap-6 py-4 text-[10px] text-[var(--text-tertiary)]">
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+                <span>100+ Countries</span>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* ── RESULTS STEP ── */}
-        {wizardStep === "results" && result && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-2xl font-bold text-white mb-1">
-                  Campaign Ready
-                </h2>
-                <p className="text-gray-400">
-                  {country} / {telco} &mdash; Session: {sessionId}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setWizardStep("input");
-                  setResult(null);
-                  setError(null);
-                  setSaved(false);
-                  setCampaignName("");
-                  localStorage.removeItem("obd_active_session");
-                }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--card-border)] text-sm text-gray-400 hover:text-white hover:border-brand-500/30 transition-all"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                New Campaign
-              </button>
+              <div className="w-px h-3 bg-[var(--card-border)]" />
+              <span>160+ Telco Partners</span>
+              <div className="w-px h-3 bg-[var(--card-border)]" />
+              <span>300M+ Daily Calls</span>
+              <div className="w-px h-3 bg-[var(--card-border)]" />
+              <span>290M+ Active Users</span>
             </div>
+          </div>
+        </div>
+      )}
 
-            {/* Save Campaign */}
-            <div className="mb-8 p-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-              {saved ? (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-[var(--success)]" />
-                    <span className="text-sm text-gray-300">
-                      Saved as <span className="font-medium text-white">{campaignName}</span>
-                    </span>
+      {/* ── RUNNING STEP ── */}
+      {wizardStep === "running" && (
+        <div className="animate-fade-in max-w-2xl mx-auto">
+          <div className="text-center mb-8">
+            <h2 className="text-xl font-bold text-[var(--text-primary)] mb-2">
+              Generating Your Campaign
+            </h2>
+            <p className="text-sm text-[var(--text-tertiary)]">
+              Our 6-agent pipeline is crafting your scripts...
+            </p>
+          </div>
+          <PipelineProgress steps={progressSteps} />
+        </div>
+      )}
+
+      {/* ── RESULTS STEP ── */}
+      {wizardStep === "results" && (
+        <div className="animate-fade-in space-y-6">
+          {/* Error */}
+          {error && (
+            <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* Success header */}
+          {result && !error && (
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--success)]/10 text-[var(--success)] text-sm font-medium border border-[var(--success)]/20 mb-3">
+                <CheckCircle2 className="w-4 h-4" />
+                Campaign Generated Successfully
+              </div>
+              <p className="text-sm text-[var(--text-tertiary)]">
+                {scripts.length} script{scripts.length !== 1 ? "s" : ""} and{" "}
+                {audioFiles.length} audio file
+                {audioFiles.length !== 1 ? "s" : ""} ready
+              </p>
+            </div>
+          )}
+
+          {/* Voice Analytics */}
+          {voiceSelection && (
+            <VoiceInfoPanel
+              voiceSelection={voiceSelection}
+              ttsEngine={result?.audio?.tts_engine}
+              edgeVoice={result?.audio?.voice_used?.voice_id}
+            />
+          )}
+
+          {/* Scripts */}
+          {scripts.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[var(--accent)]" />
+                  Generated Scripts
+                </h3>
+                {result?.session_id && (
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`/api/sessions/${result.session_id}/scripts?fmt=text`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                    >
+                      <Download className="w-3 h-3" />
+                      Text
+                    </a>
+                    <a
+                      href={`/api/sessions/${result.session_id}/scripts?fmt=json`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                    >
+                      <Download className="w-3 h-3" />
+                      JSON
+                    </a>
                   </div>
-                  <Link
-                    href="/dashboard"
-                    className="flex items-center gap-2 text-sm text-brand-400 hover:text-brand-300 transition-colors"
+                )}
+              </div>
+              {scripts.map((script: Script, idx: number) => (
+                <div
+                  key={idx}
+                  className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden hover:border-[var(--card-border-hover)] transition-colors"
+                >
+                  <button
+                    className="w-full flex items-center justify-between px-5 py-4 text-left"
+                    onClick={() =>
+                      setExpandedScript(expandedScript === idx ? null : idx)
+                    }
                   >
-                    <LayoutDashboard className="w-4 h-4" />
-                    View Dashboard
-                  </Link>
+                    <div>
+                      <span className="text-sm font-medium text-[var(--text-primary)]">
+                        Variant {script.variant_id || idx + 1}
+                      </span>
+                      <span className="text-xs text-[var(--text-tertiary)] ml-3">
+                        {script.theme || ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-[var(--text-tertiary)] bg-[var(--input-bg)] px-2 py-0.5 rounded-full">
+                        {script.word_count || "?"} words
+                      </span>
+                      {expandedScript === idx ? (
+                        <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
+                      )}
+                    </div>
+                  </button>
+                  {expandedScript === idx && (
+                    <div className="px-5 pb-5 space-y-3 animate-fade-in border-t border-[var(--card-border)]">
+                      {(["hook", "body", "cta", "full_script"] as const).map(
+                        (section) =>
+                          script[section] && (
+                            <div key={section}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                                  {section.replace("_", " ")}
+                                </span>
+                                <button
+                                  onClick={() =>
+                                    copyScript(script[section], idx)
+                                  }
+                                  className="p-1 rounded hover:bg-[var(--accent-subtle)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+                                >
+                                  {copiedScript === idx ? (
+                                    <Check className="w-3 h-3 text-[var(--success)]" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                              <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--input-bg)] px-3 py-2 rounded-lg">
+                                {script[section]}
+                              </p>
+                            </div>
+                          )
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Audio */}
+          {audioFiles.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
+                <Volume2 className="w-4 h-4 text-[var(--accent)]" />
+                Audio Files
+                {result?.audio?.tts_engine && (
+                  <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)]">
+                    {result.audio.tts_engine === "edge-tts" ? "Free TTS" : "ElevenLabs"}
+                  </span>
+                )}
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {audioFiles.map(
+                  (af: AudioFile, i: number) => {
+                    const audioSessionId = result?.audio?.session_id || result?.session_id || "";
+                    const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
+                    return (
+                      <div
+                        key={i}
+                        className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors"
+                      >
+                        <button
+                          onClick={() => toggleAudio(audioUrl)}
+                          className={`p-2.5 rounded-xl transition-colors ${playingAudio === audioUrl
+                            ? "bg-[var(--accent)] text-white"
+                            : "bg-[var(--accent-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                            }`}
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[var(--text-primary)] truncate">
+                            {af.file_name}
+                          </p>
+                          {af.file_size_bytes && (
+                            <p className="text-[10px] text-[var(--text-tertiary)]">
+                              {(af.file_size_bytes / 1024).toFixed(1)} KB
+                            </p>
+                          )}
+                        </div>
+                        <a
+                          href={audioUrl}
+                          download
+                          className="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    );
+                  }
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Save campaign */}
+          {result && !error && (
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+              {saved ? (
+                <div className="flex items-center gap-2 text-[var(--success)] text-sm">
+                  <CheckCircle2 className="w-4 h-4" />
+                  Campaign saved! View it on the{" "}
+                  <a
+                    href="/dashboard"
+                    className="underline hover:opacity-80"
+                  >
+                    Dashboard
+                  </a>
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
                   <input
                     type="text"
+                    placeholder="Campaign name..."
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 transition-colors"
                     value={campaignName}
                     onChange={(e) => setCampaignName(e.target.value)}
-                    placeholder="Name this campaign (e.g. EVA Cameroon Q1)"
-                    className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--background)] border border-[var(--card-border)] text-white placeholder-gray-500 text-sm focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/30 transition-colors"
                   />
                   <button
                     onClick={handleSaveCampaign}
                     disabled={!campaignName.trim() || saving}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-medium hover:bg-brand-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    {saving ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                    Save Campaign
+                    <Save className="w-3.5 h-3.5" />
+                    {saving ? "Saving..." : "Save"}
                   </button>
                 </div>
               )}
             </div>
+          )}
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-              {/* Scripts */}
-              <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                <ScriptReview
-                  scripts={scripts}
-                  bestVariantId={bestVariantId}
-                  sessionId={sessionId}
-                />
-              </div>
-
-              {/* Voice Selection & Audio */}
-              <div className="space-y-6">
-                {voiceSelection && (
-                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                    <VoiceInfoPanel voiceSelection={voiceSelection} />
-                  </div>
-                )}
-
-                {audioFiles.length > 0 && (
-                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                    <AudioPlayer
-                      sessionId={sessionId}
-                      audioFiles={audioFiles}
-                      voiceInfo={
-                        voiceUsed
-                          ? {
-                              name: voiceUsed.name,
-                              voice_id: voiceUsed.voice_id,
-                              settings: voiceUsed.settings,
-                            }
-                          : undefined
-                      }
-                    />
-                  </div>
-                )}
-
-                {voiceSelection && audioFiles.length === 0 && (
-                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                    <div className="text-center py-6 space-y-3">
-                      <div className="w-12 h-12 mx-auto rounded-xl bg-[var(--warning)]/15 flex items-center justify-center">
-                        <Mic2 className="w-6 h-6 text-[var(--warning)]" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-300">Audio Generation Not Available</p>
-                        <p className="text-xs text-[var(--muted)] mt-1">
-                          Add a valid <code className="px-1.5 py-0.5 rounded bg-[var(--background)] text-brand-400 text-xs">ELEVENLABS_API_KEY</code> to your <code className="px-1.5 py-0.5 rounded bg-[var(--background)] text-brand-400 text-xs">.env</code> file to enable voice recordings.
-                        </p>
-                        <p className="text-xs text-[var(--muted)] mt-2">
-                          The voice parameters above are ready to use with ElevenLabs API directly.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {!voiceSelection && audioFiles.length === 0 && (
-                  <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-                    <p className="text-center text-sm text-[var(--muted)] py-4">
-                      Voice selection and audio generation will appear here when enabled.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Pipeline completed progress */}
-            <div className="mt-8 p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-              <PipelineProgress
-                steps={PIPELINE_STEPS.map((s) => ({
-                  ...s,
-                  status: "completed" as const,
-                  message: "Done",
-                }))}
-              />
-            </div>
+          {/* Reset */}
+          <div className="text-center">
+            <button
+              onClick={handleReset}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Start New Campaign
+            </button>
           </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-[var(--card-border)] mt-16">
-        <div className="max-w-5xl mx-auto px-6 py-4 text-center text-xs text-[var(--muted)]">
-          OBD SuperStar Agent &mdash; Powered by Claude, GPT-4 & ElevenLabs V3
         </div>
-      </footer>
+      )}
     </div>
   );
 }

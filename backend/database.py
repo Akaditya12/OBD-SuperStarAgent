@@ -22,7 +22,7 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create the campaigns table if it doesn't exist."""
+    """Create the campaigns and comments tables if they don't exist."""
     conn = _get_conn()
     try:
         conn.execute("""
@@ -37,6 +37,16 @@ def init_db() -> None:
                 result_json TEXT NOT NULL DEFAULT '{}',
                 script_count INTEGER NOT NULL DEFAULT 0,
                 has_audio INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_comments (
+                id TEXT PRIMARY KEY,
+                campaign_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
             )
         """)
         conn.commit()
@@ -148,14 +158,77 @@ def get_campaign(campaign_id: str) -> Optional[dict[str, Any]]:
 
 
 def delete_campaign(campaign_id: str) -> bool:
-    """Delete a campaign. Returns True if a row was deleted."""
+    """Delete a campaign and its comments. Returns True if a row was deleted."""
     conn = _get_conn()
     try:
+        conn.execute("DELETE FROM campaign_comments WHERE campaign_id = ?", (campaign_id,))
         cursor = conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
         conn.commit()
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("Deleted campaign id=%s", campaign_id)
         return deleted
+    finally:
+        conn.close()
+
+
+# ── Campaign Comments ─────────────────────────────────────────────────────────
+
+def save_comment(
+    comment_id: str,
+    campaign_id: str,
+    username: str,
+    text: str,
+) -> dict[str, Any]:
+    """Save a comment on a campaign."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO campaign_comments (id, campaign_id, username, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            (comment_id, campaign_id, username, text, now),
+        )
+        conn.commit()
+        logger.info("Saved comment %s on campaign %s", comment_id, campaign_id)
+    finally:
+        conn.close()
+    return {
+        "id": comment_id,
+        "campaign_id": campaign_id,
+        "username": username,
+        "text": text,
+        "created_at": now,
+    }
+
+
+def list_comments(campaign_id: str) -> list[dict[str, Any]]:
+    """List all comments for a campaign, newest first."""
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, campaign_id, username, text, created_at FROM campaign_comments WHERE campaign_id = ? ORDER BY created_at DESC",
+            (campaign_id,),
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "campaign_id": row["campaign_id"],
+                "username": row["username"],
+                "text": row["text"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def delete_comment(comment_id: str) -> bool:
+    """Delete a comment. Returns True if a row was deleted."""
+    conn = _get_conn()
+    try:
+        cursor = conn.execute("DELETE FROM campaign_comments WHERE id = ?", (comment_id,))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()

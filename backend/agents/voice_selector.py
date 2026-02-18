@@ -42,10 +42,11 @@ ElevenLabs V3 Voice Settings:
 - style: 0.0 to 1.0 (style exaggeration, higher = more expressive)
 - speed: 0.7 to 1.2 (speech speed, 1.0 = normal)
 
-ElevenLabs V3 Model IDs:
-- "eleven_v3" -- latest V3 model, best for expressive speech with audio tags
-- "eleven_multilingual_v2" -- good multilingual support
-- "eleven_turbo_v2_5" -- faster, good quality
+ElevenLabs Model IDs (MUST use one of these):
+- "eleven_multilingual_v2" -- PREFERRED. Best multilingual support, works with all plans, excellent expressiveness
+- "eleven_turbo_v2_5" -- faster generation, good quality, lower latency
+
+IMPORTANT: Always recommend "eleven_multilingual_v2" as the model_id. Do NOT recommend "eleven_v3".
 
 Output valid JSON:
 {
@@ -82,7 +83,8 @@ Output valid JSON:
     {
       "voice_id": "string",
       "name": "string",
-      "reason": "string - why this is a good alternative"
+      "reason": "string - why this is a good alternative",
+      "preview_url": "string - URL to preview this voice (copy from the voice list)"
     }
   ],
   "audio_production_notes": "string - tips for best results with this voice and these scripts"

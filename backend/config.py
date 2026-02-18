@@ -20,7 +20,7 @@ DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "azure_openai")
 # --- ElevenLabs Configuration ---
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
-ELEVENLABS_TTS_MODEL = "eleven_v3"
+ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
 ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 
 # --- App Configuration ---
