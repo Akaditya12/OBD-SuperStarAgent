@@ -148,6 +148,7 @@ class PipelineOrchestrator:
             scripts = await self.script_writer.run(
                 product_brief=product_brief,
                 market_analysis=market_analysis,
+                language_override=language,
             )
             results["initial_scripts"] = scripts
             await self.on_progress("ScriptWriter", "completed", {
@@ -188,6 +189,7 @@ class PipelineOrchestrator:
                     market_analysis=market_analysis,
                     feedback=evaluation,
                     previous_scripts=final_scripts,
+                    language_override=language,
                 )
                 results[f"revised_scripts_round_{round_num + 1}"] = final_scripts
                 await self.on_progress("ScriptWriter", "completed", {

@@ -159,6 +159,7 @@ export default function VoiceInfoPanel({
   const audio_production_notes = voiceSelection?.audio_production_notes;
 
   const isEdgeTts = ttsEngine === "edge-tts";
+  const isMurf = ttsEngine === "murf";
 
   return (
     <div className="space-y-4">
@@ -171,7 +172,7 @@ export default function VoiceInfoPanel({
               ? "bg-green-500/10 text-green-600 border border-green-500/20"
               : "bg-purple-500/10 text-purple-600 border border-purple-500/20"
           }`}>
-            {isEdgeTts ? "edge-tts (Free)" : "ElevenLabs"}
+            {isMurf ? "Murf AI (Gen2)" : isEdgeTts ? "edge-tts (Free)" : "ElevenLabs"}
           </span>
         )}
       </h3>

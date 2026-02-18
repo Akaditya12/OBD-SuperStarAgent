@@ -664,7 +664,7 @@ export default function HomePage() {
                 Audio Files
                 {result?.audio?.tts_engine && (
                   <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)]">
-                    {result.audio.tts_engine === "edge-tts" ? "Free TTS" : "ElevenLabs"}
+                    {result.audio.tts_engine === "murf" ? "Murf AI" : result.audio.tts_engine === "edge-tts" ? "Free TTS" : "ElevenLabs"}
                   </span>
                 )}
               </h3>

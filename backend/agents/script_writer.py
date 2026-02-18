@@ -157,15 +157,16 @@ class ScriptWriterAgent(BaseAgent):
         market_analysis: dict[str, Any],
         feedback: dict[str, Any] | None = None,
         previous_scripts: dict[str, Any] | None = None,
+        language_override: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         is_revision = feedback is not None and previous_scripts is not None
         if is_revision:
             logger.info(f"[{self.name}] Revising scripts based on evaluation feedback")
-            return await self._revise(product_brief, market_analysis, feedback, previous_scripts)
+            return await self._revise(product_brief, market_analysis, feedback, previous_scripts, language_override)
         else:
-            logger.info(f"[{self.name}] Generating {NUM_SCRIPT_VARIANTS} new script variants")
-            return await self._generate(product_brief, market_analysis)
+            logger.info(f"[{self.name}] Generating {NUM_SCRIPT_VARIANTS} new script variants (lang={language_override})")
+            return await self._generate(product_brief, market_analysis, language_override)
 
     async def _generate_batch(
         self,
@@ -173,11 +174,20 @@ class ScriptWriterAgent(BaseAgent):
         market_summary: str,
         angles: list[str],
         start_id: int,
+        language_override: str | None = None,
     ) -> list[dict[str, Any]]:
         """Generate a small batch of script variants (2-3 at a time)."""
         angle_list = ", ".join(angles)
         count = len(angles)
         ids = ", ".join(str(start_id + i) for i in range(count))
+
+        lang_instruction = ""
+        if language_override:
+            lang_instruction = (
+                f"\n\nCRITICAL LANGUAGE REQUIREMENT: ALL scripts MUST be written in {language_override}. "
+                f"Use {language_override} as the primary language for hook, body, cta, fallbacks, "
+                f"closure, and full_script. Mix with English only for brand names and technical terms."
+            )
 
         user_prompt = f"""\
 Create exactly {count} OBD promotional script variant(s) with these creative angles: {angle_list}.
@@ -187,7 +197,7 @@ PRODUCT:
 {brief_summary}
 
 MARKET:
-{market_summary}
+{market_summary}{lang_instruction}
 
 Each variant needs its specified creative angle. Embed ElevenLabs V3 audio tags in every field. \
 Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" array of {count} objects.\
@@ -207,6 +217,7 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         self,
         product_brief: dict[str, Any],
         market_analysis: dict[str, Any],
+        language_override: str | None = None,
     ) -> dict[str, Any]:
         """Generate scripts in parallel batches to avoid LLM output-length limits."""
         brief_summary = _summarize_brief(product_brief)
@@ -222,11 +233,11 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
 
         logger.info(
             f"[{self.name}] Generating {len(angles)} variants in {len(batches)} "
-            f"parallel batches of 2"
+            f"parallel batches of 2 (lang={language_override})"
         )
 
         tasks = [
-            self._generate_batch(brief_summary, market_summary, batch_angles, start_id)
+            self._generate_batch(brief_summary, market_summary, batch_angles, start_id, language_override)
             for batch_angles, start_id in batches
         ]
         batch_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -259,6 +270,7 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         market_analysis: dict[str, Any],
         feedback: dict[str, Any],
         previous_scripts: dict[str, Any],
+        language_override: str | None = None,
     ) -> dict[str, Any]:
         """Revise scripts in parallel batches based on evaluation feedback."""
         consensus = feedback.get("consensus", {})
@@ -272,6 +284,13 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
             feedback_text += f"\n\nRevision instructions: {instructions}"
         if not feedback_text:
             feedback_text = json.dumps(feedback, indent=2)[:2000]
+
+        lang_instruction = ""
+        if language_override:
+            lang_instruction = (
+                f"\n\nCRITICAL: ALL scripts MUST remain in {language_override}. "
+                f"Do not switch to any other language."
+            )
 
         scripts = previous_scripts.get("scripts", [])
         if not scripts:
@@ -287,7 +306,7 @@ CURRENT SCRIPTS:
 {json.dumps({"scripts": batch_scripts}, indent=2)}
 
 FEEDBACK:
-{feedback_text}
+{feedback_text}{lang_instruction}
 
 Return ALL {count} revised variants. Keep each variant's unique theme. \
 Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. \

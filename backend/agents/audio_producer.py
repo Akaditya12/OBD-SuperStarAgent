@@ -1,10 +1,12 @@
 """Agent 6: Audio Producer -- generates broadcast-quality OBD audio.
 
 Produces professional audio with:
-- edge-tts (free) or ElevenLabs (premium) for voice
+- Murf AI (primary, 100k free chars) for studio-quality voice
+- edge-tts (unlimited free fallback) for voice
+- ElevenLabs (premium) for voice
 - Upbeat synthesized background music
 - Stereo 320kbps output matching industry standards
-- Natural speech patterns from audio tag conversion
+- Pronunciation dictionary for brand names (EVA, IVR, OBD, etc.)
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from backend.config import (
     ELEVENLABS_BASE_URL,
     ELEVENLABS_OUTPUT_FORMAT,
     ELEVENLABS_TTS_MODEL,
+    MURF_API_KEY,
     OUTPUTS_DIR,
 )
 
@@ -35,12 +38,8 @@ from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
 
-_AUDIO_TAGS = re.compile(
-    r"\[(excited|curious|whispers|laughs|cheerfully|mischievously|playfully|"
-    r"sigh|gasps|lightlaugh|friendly|warm|serious|dramatic|softly|"
-    r"short\s*pause|pause)\]",
-    re.IGNORECASE,
-)
+# Matches ANY [tag] -- catches all LLM-invented tags like [neutral], [friendly], etc.
+_ANY_BRACKET_TAG = re.compile(r"\[[^\]]{1,30}\]")
 
 EDGE_VOICE_MAP: dict[str, str] = {
     "en-IN": "en-IN-NeerjaNeural",
@@ -82,37 +81,163 @@ COUNTRY_LOCALE: dict[str, str] = {
     "Indonesia": "id-ID", "Philippines": "fil-PH",
 }
 
-# Prosody per section type -- clear and crisp, not rushed
+# Prosody per section type -- warm and clear with slight variation
 SECTION_PROSODY: dict[str, dict[str, str]] = {
-    "main":      {"rate": "+0%",   "pitch": "+1Hz"},
-    "fallback1": {"rate": "+3%",   "pitch": "+2Hz"},
-    "fallback2": {"rate": "+0%",   "pitch": "+0Hz"},
-    "closure":   {"rate": "-5%",   "pitch": "-1Hz"},
+    "main":      {"rate": "-3%",   "pitch": "+2Hz"},   # slightly slower = warmer
+    "fallback1": {"rate": "+0%",   "pitch": "+3Hz"},   # a touch brighter for urgency
+    "fallback2": {"rate": "-2%",   "pitch": "+1Hz"},   # calm, reassuring
+    "closure":   {"rate": "-5%",   "pitch": "-1Hz"},   # gentle close
 }
 
 
-def _clean_text_for_tts(text: str) -> str:
-    """Convert audio tags to natural speech sounds for TTS."""
-    text = re.sub(r"\[laughs?\]", "ha ha! ", text, flags=re.IGNORECASE)
+# Technical acronyms that TTS should spell out letter by letter.
+# EVA is a product NAME (pronounced "Eva") -- NOT an acronym, so it's excluded.
+_PRONUNCIATION_FIXES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bIVR\b"), "I V R"),
+    (re.compile(r"\bOBD\b"), "O B D"),
+    (re.compile(r"\bCLI\b"), "C L I"),
+    (re.compile(r"\bBNG\b"), "B N G"),
+    (re.compile(r"\bDTMF\b"), "D T M F"),
+    (re.compile(r"\bUSSD\b"), "U S S D"),
+    (re.compile(r"\bSMS\b"), "S M S"),
+    (re.compile(r"\bCTA\b"), "C T A"),
+]
+
+
+def _clean_text_for_tts(text: str, apply_pronunciation_hacks: bool = True) -> str:
+    """Strip ALL bracket tags and prepare text for TTS.
+
+    Args:
+        apply_pronunciation_hacks: If True, replace acronyms with spaced letters
+            (for edge-tts/elevenlabs). Set False for Murf which uses its own
+            pronunciationDictionary.
+    """
+    # Step 1: Convert known tags to natural speech sounds
+    text = re.sub(r"\[laughs?\]", "ha ha, ", text, flags=re.IGNORECASE)
     text = re.sub(r"\[lightlaugh\]", "heh, ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\[sigh\]", "hmm... ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[sigh\]", "hmm, ", text, flags=re.IGNORECASE)
     text = re.sub(r"\[gasps?\]", "oh! ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\[whispers?\]", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\[short\s*pause\]", "... ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\[pause\]", "...... ", text, flags=re.IGNORECASE)
-    text = _AUDIO_TAGS.sub("", text)
+    text = re.sub(r"\[short\s*pause\]", ", ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[pause\]", "... ", text, flags=re.IGNORECASE)
+
+    # Step 2: Strip ALL remaining [anything] tags
+    text = _ANY_BRACKET_TAG.sub("", text)
+
+    # Step 3: Remove markdown bold/italic markers
+    text = text.replace("**", "").replace("*", "")
+
+    # Step 4: Fix acronym/brand pronunciation (only for non-Murf engines)
+    if apply_pronunciation_hacks:
+        for pattern, replacement in _PRONUNCIATION_FIXES:
+            text = pattern.sub(replacement, text)
+
+    # Step 5: Clean up artifacts
     text = re.sub(r"\s{2,}", " ", text).strip()
+    text = re.sub(r"\s+([,.])", r"\1", text)  # fix " ," or " ."
+    text = re.sub(r"^[,.\s]+", "", text)       # fix leading comma/period
     return text
 
 
+# Language name -> edge-tts locale for proper matching
+LANGUAGE_TO_LOCALE: dict[str, str] = {
+    "hindi": "hi-IN", "hinglish": "hi-IN", "english": "en-US",
+    "tamil": "ta-IN", "telugu": "te-IN", "bengali": "bn-IN",
+    "urdu": "ur-PK", "swahili": "sw-KE", "kiswahili": "sw-KE",
+    "amharic": "am-ET", "french": "fr-FR", "arabic": "ar-SA",
+    "portuguese": "pt-BR", "indonesian": "id-ID", "filipino": "fil-PH",
+    "somali": "so-SO", "zulu": "zu-ZA", "afrikaans": "en-ZA",
+}
+
+
 def _pick_edge_voice(country: str, language: str | None) -> str:
+    """Pick the best edge-tts voice for the given country and language."""
     if language:
-        lang_lower = language.lower()
-        for locale, voice in EDGE_VOICE_MAP.items():
-            if lang_lower in locale.lower() or locale.lower().startswith(lang_lower[:2]):
-                return voice
+        lang_lower = language.lower().strip()
+        # Direct language name match (Hindi, Hinglish, Tamil, etc.)
+        if lang_lower in LANGUAGE_TO_LOCALE:
+            locale = LANGUAGE_TO_LOCALE[lang_lower]
+            if locale in EDGE_VOICE_MAP:
+                return EDGE_VOICE_MAP[locale]
+        # Try partial match (e.g. "Hindi/English mix" -> "hindi")
+        for lang_key, locale in LANGUAGE_TO_LOCALE.items():
+            if lang_key in lang_lower:
+                if locale in EDGE_VOICE_MAP:
+                    return EDGE_VOICE_MAP[locale]
+
     locale = COUNTRY_LOCALE.get(country, "en-US")
     return EDGE_VOICE_MAP.get(locale, "en-US-AriaNeural")
+
+
+# ── Murf AI voice mapping ──
+# (voice_id, locale, style) -- voice IDs are in locale-name format
+MURF_VOICE_MAP: dict[str, tuple[str, str, str]] = {
+    "hindi":      ("hi-IN-ayushi",   "hi-IN",  "Conversational"),
+    "hinglish":   ("hi-IN-ayushi",   "hi-IN",  "Conversational"),
+    "tamil":      ("ta-IN-iniya",    "ta-IN",  "Conversational"),
+    "telugu":     ("en-IN-arohi",    "te-IN",  "Promo"),
+    "bengali":    ("bn-IN-anwesha",  "bn-IN",  "Conversational"),
+    "kannada":    ("en-UK-hazel",    "kn-IN",  "Conversational"),
+    "malayalam":  ("en-IN-arohi",    "en-IN",  "Promo"),
+    "marathi":    ("en-IN-arohi",    "en-IN",  "Promo"),
+    "punjabi":    ("en-IN-arohi",    "en-IN",  "Promo"),
+    "gujarati":   ("bn-IN-anwesha",  "gu-IN",  "Conversational"),
+    "english":    ("en-IN-arohi",    "en-IN",  "Promo"),
+    "french":     ("fr-FR-justine",  "fr-FR",  "Promo"),
+    "portuguese": ("pt-BR-isadora",  "pt-BR",  "Conversational"),
+    "indonesian": ("en-US-zion",     "id-ID",  "Conversational"),
+    "filipino":   ("en-IN-arohi",    "en-IN",  "Promo"),
+    "german":     ("de-DE-josephine","de-DE",  "Promo"),
+    "spanish":    ("en-US-samantha", "es-ES",  "Promo"),
+}
+
+MURF_COUNTRY_VOICE: dict[str, tuple[str, str, str]] = {
+    "India":       ("en-IN-arohi",    "en-IN",  "Promo"),
+    "Nigeria":     ("en-US-samantha", "en-US",  "Promo"),
+    "Kenya":       ("en-US-samantha", "en-US",  "Promo"),
+    "Tanzania":    ("en-US-samantha", "en-US",  "Promo"),
+    "South Africa":("en-US-samantha", "en-US",  "Promo"),
+    "Ghana":       ("en-US-samantha", "en-US",  "Promo"),
+    "Ethiopia":    ("en-US-samantha", "en-US",  "Promo"),
+    "Cameroon":    ("fr-FR-justine",  "fr-FR",  "Promo"),
+    "Senegal":     ("fr-FR-justine",  "fr-FR",  "Promo"),
+    "Congo (DRC)": ("fr-FR-justine",  "fr-FR",  "Promo"),
+    "Mozambique":  ("pt-BR-isadora",  "pt-BR",  "Conversational"),
+    "Bangladesh":  ("bn-IN-anwesha",  "bn-IN",  "Conversational"),
+    "Pakistan":    ("en-US-samantha", "en-US",  "Promo"),
+    "Indonesia":   ("en-US-zion",     "id-ID",  "Conversational"),
+    "Philippines": ("en-IN-arohi",    "en-IN",  "Promo"),
+}
+
+# Pronunciation dictionary for Murf -- only technical acronyms
+MURF_PRONUNCIATION: dict[str, dict[str, str]] = {
+    "IVR":  {"type": "SAY_AS", "pronunciation": "I V R"},
+    "OBD":  {"type": "SAY_AS", "pronunciation": "O B D"},
+    "CLI":  {"type": "SAY_AS", "pronunciation": "C L I"},
+    "BNG":  {"type": "SAY_AS", "pronunciation": "B N G"},
+    "DTMF": {"type": "SAY_AS", "pronunciation": "D T M F"},
+    "USSD": {"type": "SAY_AS", "pronunciation": "U S S D"},
+    "SMS":  {"type": "SAY_AS", "pronunciation": "S M S"},
+    "CTA":  {"type": "SAY_AS", "pronunciation": "C T A"},
+}
+
+
+def _pick_murf_voice(country: str, language: str | None) -> tuple[str, str, str]:
+    """Pick the best Murf voice_id, locale, and style.
+
+    Returns (voice_id, multiNativeLocale, style).
+    """
+    if language:
+        lang_lower = language.lower().strip()
+        if lang_lower in MURF_VOICE_MAP:
+            return MURF_VOICE_MAP[lang_lower]
+        for lang_key, voice_info in MURF_VOICE_MAP.items():
+            if lang_key in lang_lower:
+                return voice_info
+
+    if country in MURF_COUNTRY_VOICE:
+        return MURF_COUNTRY_VOICE[country]
+
+    return ("en-IN-arohi", "en-IN", "Promo")
 
 
 def _generate_upbeat_music(duration_ms: int, sample_rate: int = 44100) -> bytes:
@@ -198,8 +323,8 @@ def _mix_voice_with_music(voice_path: Path, output_path: Path) -> None:
         music_wav = _generate_upbeat_music(music_duration)
         music = AudioSegment.from_wav(io.BytesIO(music_wav))
 
-        # Music level: -18dB below voice (subtle, professional background)
-        music = music - 18
+        # Music level: -30dB below voice (whisper-quiet, barely there)
+        music = music - 30
 
         # Add 1s silence before voice (music plays alone as intro)
         silence = AudioSegment.silent(duration=1000)
@@ -274,6 +399,7 @@ class AudioProducerAgent(BaseAgent):
     ) -> dict[str, Any]:
         """Generate audio using edge-tts with prosody and background music."""
         clean_text = _clean_text_for_tts(text)
+        logger.info(f"[{self.name}] TTS input (first 120 chars): {clean_text[:120]!r}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         prosody = SECTION_PROSODY.get(section_type, {"rate": "+0%", "pitch": "+0Hz"})
@@ -301,6 +427,92 @@ class AudioProducerAgent(BaseAgent):
             "file_size_bytes": file_size,
             "voice_id": voice,
             "model": "edge-tts",
+            "has_background_music": True,
+        }
+
+    async def _generate_murf_tts(
+        self,
+        text: str,
+        voice_id: str,
+        locale: str,
+        output_path: Path,
+        style: str = "Conversational",
+    ) -> dict[str, Any]:
+        """Generate audio using Murf AI API with pronunciation dictionary."""
+        clean_text = _clean_text_for_tts(text, apply_pronunciation_hacks=False)
+
+        logger.info(f"[{self.name}] Murf TTS input (first 150 chars): {clean_text[:150]!r}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Murf supports inline pause tags: [pause 1s]
+        clean_text = re.sub(r"\.{3,}", " [pause 0.5s] ", clean_text)
+
+        payload: dict[str, Any] = {
+            "text": clean_text,
+            "voiceId": voice_id,
+            "modelVersion": "GEN2",
+            "format": "MP3",
+            "sampleRate": 44100,
+            "channelType": "STEREO",
+            "variation": 2,
+            "pronunciationDictionary": MURF_PRONUNCIATION,
+        }
+        if locale:
+            payload["multiNativeLocale"] = locale
+        if style:
+            payload["style"] = style
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.murf.ai/v1/speech/generate",
+                json=payload,
+                headers={
+                    "api-key": MURF_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                timeout=60.0,
+            )
+            if response.status_code != 200:
+                logger.error(f"[{self.name}] Murf error {response.status_code}: {response.text[:300]}")
+                response.raise_for_status()
+
+            data = response.json()
+            audio_url = data.get("audioFile", "")
+            audio_length = data.get("audioLengthInSeconds", 0)
+            remaining = data.get("remainingCharacterCount", -1)
+
+            logger.info(
+                f"[{self.name}] Murf response: {audio_length:.1f}s, "
+                f"remaining chars: {remaining}"
+            )
+
+            if not audio_url:
+                raise ValueError("Murf returned no audioFile URL")
+
+            # Download the audio file
+            audio_response = await client.get(audio_url, timeout=30.0)
+            audio_response.raise_for_status()
+
+            # Save voice-only first
+            voice_only_path = output_path.with_suffix(".voice.mp3")
+            voice_only_path.write_bytes(audio_response.content)
+
+        # Mix with background music
+        _mix_voice_with_music(voice_only_path, output_path)
+        voice_only_path.unlink(missing_ok=True)
+
+        file_size = output_path.stat().st_size
+        logger.info(
+            f"[{self.name}] Murf: {output_path.name} "
+            f"({file_size / 1024:.1f} KB, voice={voice_id}, locale={locale})"
+        )
+
+        return {
+            "file_path": str(output_path),
+            "file_name": output_path.name,
+            "file_size_bytes": file_size,
+            "voice_id": voice_id,
+            "model": "murf-gen2",
             "has_background_music": True,
         }
 
@@ -397,16 +609,26 @@ class AudioProducerAgent(BaseAgent):
         session_dir = OUTPUTS_DIR / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
 
-        # Decide TTS engine
-        use_elevenlabs = False
+        # Decide TTS engine: Murf > ElevenLabs > edge-tts
+        tts_engine = "edge-tts"
         el_voice_id = ""
         el_model_id = ELEVENLABS_TTS_MODEL
         edge_voice = ""
+        murf_voice_id = ""
+        murf_locale = ""
 
-        if self._has_elevenlabs_credits():
+        murf_style = ""
+        if MURF_API_KEY:
+            murf_voice_id, murf_locale, murf_style = _pick_murf_voice(country, language)
+            tts_engine = "murf"
+            logger.info(
+                f"[{self.name}] Using Murf AI: voice={murf_voice_id}, "
+                f"locale={murf_locale}, style={murf_style}"
+            )
+        elif self._has_elevenlabs_credits():
             has_quota = await self._check_elevenlabs_quota()
             if has_quota:
-                use_elevenlabs = True
+                tts_engine = "elevenlabs"
                 el_voice_id = voice_selection["selected_voice"]["voice_id"]
                 api_params = voice_selection.get("elevenlabs_api_params", {})
                 el_model_id = api_params.get("model_id", ELEVENLABS_TTS_MODEL)
@@ -415,7 +637,7 @@ class AudioProducerAgent(BaseAgent):
                 el_voice_id = await self._validate_voice_id(el_voice_id)
                 logger.info(f"[{self.name}] Using ElevenLabs: voice={voice_name}, model={el_model_id}")
 
-        if not use_elevenlabs:
+        if tts_engine == "edge-tts":
             edge_voice = _pick_edge_voice(country, language)
             logger.info(f"[{self.name}] Using edge-tts (FREE): voice={edge_voice}")
 
@@ -443,12 +665,25 @@ class AudioProducerAgent(BaseAgent):
                         "theme": theme,
                     })
 
-        engine_label = f"ElevenLabs ({el_model_id})" if use_elevenlabs else "edge-tts"
+        engine_labels = {
+            "murf": f"Murf AI ({murf_voice_id})",
+            "elevenlabs": f"ElevenLabs ({el_model_id})",
+            "edge-tts": f"edge-tts ({edge_voice})",
+        }
+        engine_label = engine_labels.get(tts_engine, tts_engine)
         logger.info(f"[{self.name}] Generating {len(jobs)} audio files via {engine_label}")
 
         async def _tts_job(job: dict[str, Any]) -> dict[str, Any]:
             try:
-                if use_elevenlabs:
+                if tts_engine == "murf":
+                    result = await self._generate_murf_tts(
+                        text=job["text"],
+                        voice_id=murf_voice_id,
+                        locale=murf_locale,
+                        output_path=job["path"],
+                        style=murf_style,
+                    )
+                elif tts_engine == "elevenlabs":
                     result = await self._generate_elevenlabs(
                         text=job["text"],
                         voice_id=el_voice_id,
@@ -492,13 +727,24 @@ class AudioProducerAgent(BaseAgent):
             f"{len(failed)} failed via {engine_label}"
         )
 
+        voice_id_used = (
+            murf_voice_id if tts_engine == "murf"
+            else el_voice_id if tts_engine == "elevenlabs"
+            else edge_voice
+        )
+        voice_name_used = (
+            f"{murf_voice_id} ({murf_locale})" if tts_engine == "murf"
+            else voice_name if tts_engine == "elevenlabs"
+            else edge_voice
+        )
+
         return {
             "session_id": session_id,
             "session_dir": str(session_dir),
-            "tts_engine": "elevenlabs" if use_elevenlabs else "edge-tts",
+            "tts_engine": tts_engine,
             "voice_used": {
-                "voice_id": el_voice_id if use_elevenlabs else edge_voice,
-                "name": voice_name if use_elevenlabs else edge_voice,
+                "voice_id": voice_id_used,
+                "name": voice_name_used,
                 "settings": voice_settings,
             },
             "audio_files": successful,

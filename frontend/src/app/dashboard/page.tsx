@@ -7,8 +7,6 @@ import {
   Globe,
   Building2,
   ChevronDown,
-  ChevronUp,
-  Volume2,
   Play,
   Download,
   FileText,
@@ -286,15 +284,31 @@ export default function DashboardPage() {
     (af: AudioFile) => af.file_name && !af.error
   );
 
+  // Group audio files by variant for smart pairing
+  const audioByVariant: Record<number, AudioFile[]> = {};
+  for (const af of audioFiles) {
+    const vid = af.variant_id ?? 0;
+    if (!audioByVariant[vid]) audioByVariant[vid] = [];
+    audioByVariant[vid].push(af);
+  }
+
   return (
     <div className="min-h-screen px-4 sm:px-6 lg:px-8 py-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-1">Dashboard</h1>
-          <p className="text-sm text-[var(--text-tertiary)]">
-            Manage campaigns and track team activity
-          </p>
+        <div className="mb-8 flex items-end justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Dashboard</h1>
+            <p className="text-sm text-[var(--text-tertiary)] mt-0.5">
+              Manage campaigns and track team activity
+            </p>
+          </div>
+          <button
+            onClick={() => router.push("/")}
+            className="px-4 py-2 text-xs font-medium rounded-xl bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+          >
+            + New Campaign
+          </button>
         </div>
 
         {/* Stats */}
@@ -312,11 +326,11 @@ export default function DashboardPage() {
           <div className="lg:col-span-2 space-y-4">
             {/* Search */}
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
               <input
                 type="text"
                 placeholder="Search campaigns..."
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 transition-colors"
+                className="w-full pl-10 pr-4 py-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-2 focus:ring-[var(--accent)]/10 transition-all"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -324,21 +338,30 @@ export default function DashboardPage() {
 
             {/* Campaign list */}
             {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-6 h-6 text-[var(--accent)] animate-spin" />
               </div>
             ) : filtered.length === 0 ? (
-              <div className="text-center py-12 text-gray-600">
-                {searchQuery
-                  ? "No campaigns match your search"
-                  : "No campaigns yet. Create one from the Home page."}
+              <div className="text-center py-16">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-[var(--text-tertiary)]" />
+                </div>
+                <p className="text-sm text-[var(--text-tertiary)]">
+                  {searchQuery
+                    ? "No campaigns match your search"
+                    : "No campaigns yet. Create one to get started."}
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
                 {filtered.map((campaign) => (
                   <div
                     key={campaign.id}
-                    className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden hover:border-[var(--card-border-hover)] transition-all group"
+                    className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-all duration-200 group ${
+                      expandedId === campaign.id
+                        ? "border-[var(--accent)]/30 shadow-lg shadow-[var(--accent)]/5"
+                        : "border-[var(--card-border)] hover:border-[var(--card-border-hover)]"
+                    }`}
                   >
                     {/* Header row */}
                     <div
@@ -354,37 +377,34 @@ export default function DashboardPage() {
                       }}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-sm font-medium text-[var(--text-primary)] truncate">
+                        <div className="flex items-center gap-2.5 mb-1.5">
+                          <h3 className="text-sm font-semibold text-[var(--text-primary)] truncate">
                             {campaign.name}
                           </h3>
                           <PresenceBar
-                            users={
-                              expandedId === campaign.id ? presenceUsers : []
-                            }
+                            users={expandedId === campaign.id ? presenceUsers : []}
                             maxVisible={3}
                           />
                         </div>
-                        <div className="flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {campaign.country && (
-                            <span className="flex items-center gap-1">
-                              <Globe className="w-3 h-3" />
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent)]/8 text-[var(--accent)] font-medium">
+                              <Globe className="w-2.5 h-2.5" />
                               {campaign.country}
                             </span>
                           )}
                           {campaign.telco && (
-                            <span className="flex items-center gap-1">
-                              <Building2 className="w-3 h-3" />
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/8 text-purple-500 font-medium">
+                              <Building2 className="w-2.5 h-2.5" />
                               {campaign.telco}
                             </span>
                           )}
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {new Date(campaign.created_at).toLocaleDateString()}
+                          <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
+                            <Calendar className="w-2.5 h-2.5" />
+                            {new Date(campaign.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
                           </span>
-                          <span className="flex items-center gap-1">
-                            <FileText className="w-3 h-3" />
-                            {campaign.script_count} scripts
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-500 font-medium">
+                            {campaign.script_count} variants
                           </span>
                         </div>
                       </div>
@@ -398,108 +418,93 @@ export default function DashboardPage() {
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                        {expandedId === campaign.id ? (
-                          <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" />
-                        ) : (
+                        <div className={`p-1 rounded-lg transition-transform duration-200 ${expandedId === campaign.id ? "rotate-180" : ""}`}>
                           <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
-                        )}
+                        </div>
                       </div>
                     </div>
 
                     {/* Expanded detail */}
                     {expandedId === campaign.id && (
-                      <div className="px-5 pb-5 border-t border-[var(--card-border)] animate-fade-in">
+                      <div className="px-5 pb-5 border-t border-[var(--card-border)]">
                         {detailLoading ? (
-                          <div className="flex items-center justify-center py-8">
-                            <Loader2 className="w-5 h-5 text-brand-500 animate-spin" />
+                          <div className="flex items-center justify-center py-10">
+                            <Loader2 className="w-5 h-5 text-[var(--accent)] animate-spin" />
                           </div>
                         ) : detail ? (
-                          <div className="space-y-4 mt-4">
-                            {/* Scripts */}
+                          <div className="space-y-3 mt-4">
+                            {/* Script + Audio paired cards */}
                             {scripts.length > 0 && (
-                              <div>
-                                <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
-                                  <FileText className="w-3 h-3 text-[var(--accent)]" />
-                                  Scripts
-                                </h4>
-                                <div className="space-y-2">
-                                  {scripts.map(
-                                    (
-                                      script: Script,
-                                      idx: number
-                                    ) => (
-                                      <div
-                                        key={idx}
-                                        className="p-3 rounded-xl bg-[var(--background)] border border-[var(--card-border)]"
-                                      >
-                                        <div className="flex items-center justify-between mb-2">
-                                          <span className="text-xs font-medium text-[var(--text-primary)]">
-                                            Variant{" "}
-                                            {script.variant_id ||
-                                              idx + 1}
-                                          </span>
-                                          <span className="text-[10px] text-gray-600">
-                                            {script.word_count ||
-                                              "?"}{" "}
-                                            words
-                                          </span>
-                                        </div>
-                                        {script.full_script && (
-                                          <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-3">
-                                            {script.full_script}
-                                          </p>
-                                        )}
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-                            )}
+                              <div className="space-y-2.5">
+                                {scripts.map((script: Script, idx: number) => {
+                                  const vid = script.variant_id || idx + 1;
+                                  const variantAudio = audioByVariant[vid] || [];
+                                  const audioSessionId = detail?.result?.audio?.session_id || detail?.result?.session_id || "";
 
-                            {/* Audio */}
-                            {audioFiles.length > 0 && (
-                              <div>
-                                <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
-                                  <Volume2 className="w-3 h-3 text-[var(--accent)]" />
-                                  Audio
-                                </h4>
-                                <div className="flex flex-wrap gap-2">
-                                  {audioFiles.map(
-                                    (
-                                      af: AudioFile,
-                                      i: number
-                                    ) => {
-                                      const audioSessionId = detail?.result?.audio?.session_id || detail?.result?.session_id || "";
-                                      const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
-                                      return (
-                                        <div
-                                          key={i}
-                                          className="flex items-center gap-2 p-2 rounded-lg bg-[var(--background)] border border-[var(--card-border)]"
-                                        >
-                                          <button
-                                            onClick={() => toggleAudio(audioUrl)}
-                                            className={`p-1.5 rounded-lg ${playingAudio === audioUrl
-                                              ? "bg-brand-500 text-white"
-                                              : "text-gray-400 hover:text-white"
-                                              }`}
-                                          >
-                                            <Play className="w-3 h-3" />
-                                          </button>
-                                          <span className="text-[10px] text-gray-400 max-w-[100px] truncate">
-                                            {af.file_name}
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="p-4 rounded-xl bg-[var(--background)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors"
+                                    >
+                                      {/* Variant header */}
+                                      <div className="flex items-center justify-between mb-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
+                                            V{vid}
                                           </span>
-                                          <a
-                                            href={audioUrl}
-                                            download
-                                            className="p-1 text-gray-600 hover:text-white"
-                                          >
-                                            <Download className="w-3 h-3" />
-                                          </a>
+                                          {script.theme && (
+                                            <span className="text-xs font-medium text-[var(--text-secondary)]">
+                                              {script.theme}
+                                            </span>
+                                          )}
                                         </div>
-                                      );
-                                    }
-                                  )}
-                                </div>
+                                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                                          {script.word_count || "?"} words &middot; ~{script.estimated_duration_seconds || "?"}s
+                                        </span>
+                                      </div>
+
+                                      {/* Script text */}
+                                      {script.full_script && (
+                                        <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed mb-3 line-clamp-3">
+                                          {script.full_script}
+                                        </p>
+                                      )}
+
+                                      {/* Audio controls inline */}
+                                      {variantAudio.length > 0 && (
+                                        <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
+                                          {variantAudio.map((af: AudioFile, ai: number) => {
+                                            const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
+                                            const label = af.file_name?.replace(/\.mp3$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
+                                            const isPlaying = playingAudio === audioUrl;
+                                            return (
+                                              <div key={ai} className="flex items-center gap-1.5">
+                                                <button
+                                                  onClick={() => toggleAudio(audioUrl)}
+                                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                                                    isPlaying
+                                                      ? "bg-[var(--accent)] text-white shadow-sm"
+                                                      : "bg-[var(--card)] border border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
+                                                  }`}
+                                                >
+                                                  <Play className={`w-2.5 h-2.5 ${isPlaying ? "animate-pulse" : ""}`} />
+                                                  {label}
+                                                </button>
+                                                <a
+                                                  href={audioUrl}
+                                                  download
+                                                  className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
+                                                >
+                                                  <Download className="w-2.5 h-2.5" />
+                                                </a>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
 
@@ -515,7 +520,7 @@ export default function DashboardPage() {
                             </div>
                           </div>
                         ) : (
-                          <p className="text-xs text-gray-600 py-4 text-center">
+                          <p className="text-xs text-[var(--text-tertiary)] py-6 text-center">
                             Failed to load campaign details.
                           </p>
                         )}

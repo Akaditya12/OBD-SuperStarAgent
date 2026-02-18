@@ -61,6 +61,31 @@ const TELCOS: Record<string, string[]> = {
   Philippines: ["Globe", "Smart", "DITO"],
 };
 
+const LANGUAGES: Record<string, string[]> = {
+  Cameroon: ["French", "English", "Pidgin English"],
+  "Congo (DRC)": ["French", "Lingala", "Swahili"],
+  "Congo (Republic)": ["French", "Lingala"],
+  Ethiopia: ["Amharic", "Oromo", "English"],
+  Ghana: ["English", "Twi", "Pidgin English"],
+  Kenya: ["English", "Swahili"],
+  Mozambique: ["Portuguese"],
+  Nigeria: ["English", "Pidgin English", "Hausa", "Yoruba", "Igbo"],
+  Rwanda: ["Kinyarwanda", "English", "French"],
+  Senegal: ["French", "Wolof"],
+  Somalia: ["Somali", "Arabic", "English"],
+  "South Africa": ["English", "Zulu", "Afrikaans", "Xhosa"],
+  Tanzania: ["Swahili", "English"],
+  Uganda: ["English", "Luganda", "Swahili"],
+  Zambia: ["English", "Bemba", "Nyanja"],
+  Zimbabwe: ["English", "Shona", "Ndebele"],
+  Botswana: ["English", "Setswana"],
+  India: ["Hindi", "Hinglish", "Tamil", "Telugu", "Bengali", "Kannada", "Malayalam", "English"],
+  Bangladesh: ["Bengali", "English"],
+  Pakistan: ["Urdu", "English", "Punjabi"],
+  Indonesia: ["Indonesian", "English"],
+  Philippines: ["Filipino", "English", "Tagalog"],
+};
+
 const selectClass =
   "w-full px-4 py-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/20 transition-all appearance-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 
@@ -131,13 +156,21 @@ export default function CountryTelcoSelect({
           Language Override{" "}
           <span className="text-xs text-[var(--text-tertiary)]">(optional)</span>
         </label>
-        <input
-          type="text"
+        <select
           value={language}
           onChange={(e) => onLanguageChange(e.target.value)}
-          placeholder="Auto-detected from market analysis (e.g., French, Swahili)"
-          className="w-full px-4 py-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/20 transition-all"
-        />
+          disabled={!country}
+          className={selectClass}
+        >
+          <option value="">
+            {country ? "Auto-detect from market analysis" : "Select a country first"}
+          </option>
+          {(country ? LANGUAGES[country] || [] : []).map((lang) => (
+            <option key={lang} value={lang}>
+              {lang}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );

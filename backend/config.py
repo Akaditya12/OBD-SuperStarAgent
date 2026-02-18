@@ -23,6 +23,9 @@ ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
 ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
 ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 
+# --- Murf AI Configuration ---
+MURF_API_KEY = os.getenv("MURF_API_KEY", "")
+
 # --- App Configuration ---
 OUTPUTS_DIR = Path(__file__).parent / "outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)

@@ -26,6 +26,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ── Stage 3: Final runtime image ──
 FROM python:3.11-slim
 
+# ffmpeg is required by pydub for audio mixing
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Install Node.js (copy from the official node image instead of NodeSource)
 COPY --from=node:20-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node:20-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
