@@ -735,7 +735,7 @@ async def add_comment(campaign_id: str, request: Request):
     """Add a comment to a campaign."""
     body = await request.json()
     text = body.get("text", "").strip()
-    username = getattr(request.state, "username", body.get("username", "anonymous"))
+    username = getattr(request.state, "username", body.get("username", "local"))
     if not text:
         return JSONResponse(status_code=400, content={"error": "Comment text is required"})
 
@@ -780,25 +780,21 @@ async def websocket_collaborate(ws: WebSocket, campaign_id: str):
     await ws.accept()
     ws_id = str(uuid.uuid4())
 
-    # Determine username
     from backend.auth import get_token_from_websocket, verify_token, auth_enabled
-    username = "anonymous"
+    username = "local"
     if auth_enabled():
         token = get_token_from_websocket(ws)
         if token:
-            username = verify_token(token) or "anonymous"
+            username = verify_token(token) or "user"
 
     user = register_user(ws_id, username, ws)
     update_user_activity(ws_id, campaign_id)
     room = get_or_create_room(campaign_id)
     room.add(ws_id, ws)
 
-    # Record and broadcast join
-    event = record_activity("user_joined", username, campaign_id)
     await room.broadcast(
         {"type": "user_joined", "user": user.to_dict()}, exclude_ws_id=ws_id
     )
-    await broadcast_to_all({"type": "activity", "event": event})
 
     # Send current state to the connecting user
     await ws.send_json({
@@ -827,9 +823,7 @@ async def websocket_collaborate(ws: WebSocket, campaign_id: str):
         left_user = unregister_user(ws_id)
         cleanup_room(campaign_id)
         if left_user:
-            event = record_activity("user_left", left_user.username, campaign_id)
             await room.broadcast({"type": "user_left", "username": left_user.username})
-            await broadcast_to_all({"type": "activity", "event": event})
 
 
 # ── WebSocket Endpoints ──

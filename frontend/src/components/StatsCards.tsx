@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
     FolderOpen,
     Layers,
-    Users,
+    Clock,
     Sparkles,
 } from "lucide-react";
 
@@ -12,7 +12,7 @@ interface StatsCardsProps {
     campaignCount: number;
     scriptCount: number;
     audioCount: number;
-    onlineUsers?: number;
+    lastGeneratedAt?: string | null;
 }
 
 function AnimatedNumber({ value }: { value: number }) {
@@ -39,11 +39,19 @@ function AnimatedNumber({ value }: { value: number }) {
     return <>{display}</>;
 }
 
+function formatRelativeTime(iso: string): string {
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+}
+
 export default function StatsCards({
     campaignCount,
     scriptCount,
     audioCount,
-    onlineUsers = 0,
+    lastGeneratedAt,
 }: StatsCardsProps) {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -88,25 +96,28 @@ export default function StatsCards({
                 </div>
             </div>
 
-            {/* Team Online */}
+            {/* Last Generated */}
             <div className="group relative p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-purple-500/30 transition-all duration-300 overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-br from-purple-500/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                 <div className="relative">
                     <div className="flex items-center justify-between mb-4">
                         <div className="p-2.5 rounded-xl bg-purple-500/10">
-                            <Users className="w-5 h-5 text-purple-500" />
+                            <Clock className="w-5 h-5 text-purple-500" />
                         </div>
-                        {onlineUsers > 0 && (
-                            <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-medium">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                active
+                        {lastGeneratedAt && (
+                            <span className="flex items-center gap-1 text-[10px] text-purple-400 font-medium">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                                recent
                             </span>
                         )}
                     </div>
-                    <div className="text-3xl font-bold text-[var(--text-primary)] tabular-nums tracking-tight">
-                        <AnimatedNumber value={onlineUsers} />
+                    <div className="text-lg font-bold text-[var(--text-primary)] tracking-tight">
+                        {lastGeneratedAt
+                            ? formatRelativeTime(lastGeneratedAt)
+                            : <span className="text-[var(--text-tertiary)] text-sm font-normal">No campaigns yet</span>
+                        }
                     </div>
-                    <p className="text-xs text-[var(--text-tertiary)] mt-1 font-medium">Team Online</p>
+                    <p className="text-xs text-[var(--text-tertiary)] mt-1 font-medium">Last Generated</p>
                 </div>
             </div>
         </div>

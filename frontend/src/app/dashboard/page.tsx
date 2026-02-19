@@ -46,7 +46,6 @@ export default function DashboardPage() {
   // Collaboration state
   const [comments, setComments] = useState<Comment[]>([]);
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
-  const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
   const [activityEvents, setActivityEvents] = useState<CollaborationEvent[]>([]);
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const collabWsRef = useRef<WebSocket | null>(null);
@@ -89,17 +88,8 @@ export default function DashboardPage() {
     loadCampaigns();
   }, [loadCampaigns]);
 
-  // ── Load online users & activity ──
+  // ── Load activity feed ──
   useEffect(() => {
-    const fetchPresence = async () => {
-      try {
-        const res = await fetch("/api/presence");
-        if (res.ok) {
-          const data = await res.json();
-          setOnlineUsers(data.users || []);
-        }
-      } catch { /* silent */ }
-    };
     const fetchActivity = async () => {
       try {
         const res = await fetch("/api/activity?limit=15");
@@ -109,12 +99,8 @@ export default function DashboardPage() {
         }
       } catch { /* silent */ }
     };
-    fetchPresence();
     fetchActivity();
-    const interval = setInterval(() => {
-      fetchPresence();
-      fetchActivity();
-    }, 15000);
+    const interval = setInterval(fetchActivity, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -317,7 +303,7 @@ export default function DashboardPage() {
             campaignCount={campaigns.length}
             scriptCount={totalScripts}
             audioCount={totalAudio}
-            onlineUsers={onlineUsers.length}
+            lastGeneratedAt={campaigns.length > 0 ? campaigns[0].created_at : null}
           />
         </div>
 
