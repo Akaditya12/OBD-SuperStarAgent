@@ -220,12 +220,12 @@ class PipelineOrchestrator:
                 "user_prompt": self.voice_selector.last_user_prompt,
             })
 
-            # ── Step 7: Audio Production ──
+            # ── Step 7: Audio Production (hook previews for 2-phase, or full) ──
             await self.on_progress("AudioProducer", "started", {
-                "message": "Generating audio recordings..."
+                "message": "Generating hook audio previews (3 voices)..."
             })
             try:
-                audio_result = await self.audio_producer.run(
+                hook_result = await self.audio_producer.run_hook_previews(
                     scripts=final_scripts,
                     voice_selection=voice_selection,
                     session_id=session_id,
@@ -233,17 +233,17 @@ class PipelineOrchestrator:
                     language=language,
                     tts_engine_override=tts_engine,
                 )
-                results["audio"] = audio_result
-                successful = audio_result.get("summary", {}).get("total_generated", 0)
-                engine = audio_result.get("tts_engine", "unknown")
+                results["hook_previews"] = hook_result
+                preview_count = len(hook_result.get("audio_files", []))
+                engine = hook_result.get("tts_engine", "unknown")
                 await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Generated {successful} audio files via {engine}",
-                    "data": {"summary": audio_result.get("summary", {})},
+                    "message": f"Generated {preview_count} hook previews via {engine}. Pick your voices!",
+                    "data": {"summary": {"total_previews": preview_count}},
                 })
             except Exception as audio_err:
-                logger.error(f"Audio production failed: {audio_err}")
+                logger.error(f"Hook preview generation failed: {audio_err}")
                 await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Audio generation failed: {str(audio_err)}. Scripts are still available.",
+                    "message": f"Hook preview failed: {str(audio_err)}. Scripts are still available.",
                 })
 
             # ── Pipeline Complete ──
@@ -263,3 +263,41 @@ class PipelineOrchestrator:
             results["error"] = str(e)
 
         return results
+
+    async def run_full_audio(
+        self,
+        scripts: dict[str, Any],
+        voice_selection: dict[str, Any],
+        voice_choices: dict[int, int],
+        session_id: str,
+        country: str = "",
+        language: str | None = None,
+        tts_engine: str | None = None,
+    ) -> dict[str, Any]:
+        """Phase 2: generate final audio with the user-chosen voice per variant."""
+        await self.on_progress("AudioProducer", "started", {
+            "message": "Generating final audio with chosen voices..."
+        })
+        try:
+            audio_result = await self.audio_producer.run_final_audio(
+                scripts=scripts,
+                voice_selection=voice_selection,
+                voice_choices=voice_choices,
+                session_id=session_id,
+                country=country,
+                language=language,
+                tts_engine_override=tts_engine,
+            )
+            successful = audio_result.get("summary", {}).get("total_generated", 0)
+            engine = audio_result.get("tts_engine", "unknown")
+            await self.on_progress("AudioProducer", "completed", {
+                "message": f"Generated {successful} final audio files via {engine}",
+                "data": {"summary": audio_result.get("summary", {})},
+            })
+            return audio_result
+        except Exception as e:
+            logger.error(f"Final audio generation failed: {e}")
+            await self.on_progress("AudioProducer", "completed", {
+                "message": f"Final audio failed: {str(e)}",
+            })
+            return {"error": str(e)}

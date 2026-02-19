@@ -561,24 +561,28 @@ class AudioProducerAgent(BaseAgent):
         voice: str,
         output_path: Path,
         section_type: str = "main",
+        skip_bgm: bool = False,
     ) -> dict[str, Any]:
-        """Generate audio using edge-tts with prosody and background music."""
+        """Generate audio using edge-tts with prosody and optional background music."""
         clean_text = _clean_text_for_tts(text)
         logger.info(f"[{self.name}] TTS input (first 120 chars): {clean_text[:120]!r}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         prosody = SECTION_PROSODY.get(section_type, {"rate": "+0%", "pitch": "+0Hz"})
 
-        # Generate voice-only first
-        voice_only_path = output_path.with_suffix(".voice.mp3")
-        communicate = edge_tts.Communicate(
-            clean_text, voice, rate=prosody["rate"], pitch=prosody["pitch"]
-        )
-        await communicate.save(str(voice_only_path))
-
-        # Mix with background music for all sections
-        _mix_voice_with_music(voice_only_path, output_path)
-        voice_only_path.unlink(missing_ok=True)
+        if skip_bgm:
+            communicate = edge_tts.Communicate(
+                clean_text, voice, rate=prosody["rate"], pitch=prosody["pitch"]
+            )
+            await communicate.save(str(output_path))
+        else:
+            voice_only_path = output_path.with_suffix(".voice.mp3")
+            communicate = edge_tts.Communicate(
+                clean_text, voice, rate=prosody["rate"], pitch=prosody["pitch"]
+            )
+            await communicate.save(str(voice_only_path))
+            _mix_voice_with_music(voice_only_path, output_path)
+            voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
         logger.info(
@@ -602,6 +606,7 @@ class AudioProducerAgent(BaseAgent):
         locale: str,
         output_path: Path,
         style: str = "Conversational",
+        skip_bgm: bool = False,
     ) -> dict[str, Any]:
         """Generate audio using Murf AI API with pronunciation dictionary."""
         clean_text = _clean_text_for_tts(text, apply_pronunciation_hacks=False)
@@ -609,7 +614,6 @@ class AudioProducerAgent(BaseAgent):
         logger.info(f"[{self.name}] Murf TTS input (first 150 chars): {clean_text[:150]!r}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Murf supports inline pause tags: [pause 1s]
         clean_text = re.sub(r"\.{3,}", " [pause 0.5s] ", clean_text)
 
         payload: dict[str, Any] = {
@@ -654,17 +658,16 @@ class AudioProducerAgent(BaseAgent):
             if not audio_url:
                 raise ValueError("Murf returned no audioFile URL")
 
-            # Download the audio file
             audio_response = await client.get(audio_url, timeout=30.0)
             audio_response.raise_for_status()
 
-            # Save voice-only first
-            voice_only_path = output_path.with_suffix(".voice.mp3")
-            voice_only_path.write_bytes(audio_response.content)
-
-        # Mix with background music
-        _mix_voice_with_music(voice_only_path, output_path)
-        voice_only_path.unlink(missing_ok=True)
+            if skip_bgm:
+                output_path.write_bytes(audio_response.content)
+            else:
+                voice_only_path = output_path.with_suffix(".voice.mp3")
+                voice_only_path.write_bytes(audio_response.content)
+                _mix_voice_with_music(voice_only_path, output_path)
+                voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
         logger.info(
@@ -697,15 +700,12 @@ class AudioProducerAgent(BaseAgent):
             "text": clean_text,
             "model_id": effective_model,
             "voice_settings": {
-                "stability": voice_settings.get("stability", 0.5),
+                "stability": voice_settings.get("stability", 0.45),
                 "similarity_boost": voice_settings.get("similarity_boost", 0.75),
+                "style": voice_settings.get("style", 0.5),
                 "use_speaker_boost": True,
             },
         }
-        style_val = voice_settings.get("style")
-        if style_val is not None:
-            payload["voice_settings"]["style"] = float(style_val)
-
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
@@ -757,6 +757,323 @@ class AudioProducerAgent(BaseAgent):
             logger.error(f"[{self.name}] Voice validation failed: {e}")
         return voice_id
 
+    def _resolve_engine_and_voices(
+        self,
+        voice_selection: dict[str, Any],
+        country: str,
+        language: str | None,
+        tts_engine_override: str | None,
+    ) -> dict[str, Any]:
+        """Resolve TTS engine, voice IDs, and voice pools. Synchronous helper."""
+        voice_settings = voice_selection.get("voice_settings", {})
+        voice_name = voice_selection.get("selected_voice", {}).get("name", "Unknown")
+
+        tts_engine = "edge-tts"
+        el_voice_id = ""
+        el_model_id = ELEVENLABS_TTS_MODEL
+        edge_voice = ""
+        murf_voice_id = ""
+        murf_locale = ""
+        murf_style = ""
+
+        if tts_engine_override in ("murf", "elevenlabs", "edge-tts"):
+            tts_engine = tts_engine_override
+        elif MURF_API_KEY:
+            tts_engine = "murf"
+        elif self._has_elevenlabs_credits():
+            tts_engine = "elevenlabs"
+
+        if tts_engine == "murf":
+            if not MURF_API_KEY:
+                tts_engine = "edge-tts"
+            else:
+                murf_voice_id, murf_locale, murf_style = _pick_murf_voice(country, language)
+
+        if tts_engine == "elevenlabs":
+            if not self._has_elevenlabs_credits():
+                tts_engine = "edge-tts"
+            else:
+                el_voice_id = voice_selection["selected_voice"]["voice_id"]
+                api_params = voice_selection.get("elevenlabs_api_params", {})
+                el_model_id = api_params.get("model_id", ELEVENLABS_TTS_MODEL)
+                if el_model_id == "eleven_v3":
+                    el_model_id = ELEVENLABS_TTS_MODEL
+
+        if tts_engine == "edge-tts":
+            edge_voice = _pick_edge_voice(country, language)
+
+        # Build voice pools
+        voice_pool: list[Any] = []
+        if tts_engine == "murf":
+            voice_pool = _get_murf_voice_pool(country, language)
+        elif tts_engine == "edge-tts":
+            voice_pool = _get_edge_voice_pool(country, language)
+        else:
+            alt_voices = voice_selection.get("alternative_voices", [])
+            voice_pool = [(el_voice_id, voice_name)]
+            for av in alt_voices[:2]:
+                voice_pool.append((av.get("voice_id", el_voice_id), av.get("name", "Alt")))
+            while len(voice_pool) < 3:
+                voice_pool.append(voice_pool[0])
+
+        return {
+            "tts_engine": tts_engine,
+            "voice_pool": voice_pool,
+            "voice_settings": voice_settings,
+            "voice_name": voice_name,
+            "el_voice_id": el_voice_id,
+            "el_model_id": el_model_id,
+            "edge_voice": edge_voice,
+            "murf_voice_id": murf_voice_id,
+            "murf_locale": murf_locale,
+            "murf_style": murf_style,
+        }
+
+    async def _run_tts_jobs(
+        self,
+        jobs: list[dict[str, Any]],
+        tts_engine: str,
+        ctx: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Execute a list of TTS jobs concurrently. Returns (successful, failed)."""
+        voice_settings = ctx["voice_settings"]
+        el_voice_id = ctx["el_voice_id"]
+        el_model_id = ctx["el_model_id"]
+        edge_voice = ctx["edge_voice"]
+
+        async def _tts_job(job: dict[str, Any]) -> dict[str, Any]:
+            try:
+                skip_bgm = job.get("skip_bgm", False)
+                if tts_engine == "murf":
+                    result = await self._generate_murf_tts(
+                        text=job["text"],
+                        voice_id=job["murf_voice_id"],
+                        locale=job["murf_locale"],
+                        output_path=job["path"],
+                        style=job["murf_style"],
+                        skip_bgm=skip_bgm,
+                    )
+                elif tts_engine == "elevenlabs":
+                    result = await self._generate_elevenlabs(
+                        text=job["text"],
+                        voice_id=job.get("el_voice_id", el_voice_id),
+                        voice_settings=voice_settings,
+                        output_path=job["path"],
+                        model_id=el_model_id,
+                    )
+                else:
+                    result = await self._generate_edge_tts(
+                        text=job["text"],
+                        voice=job.get("edge_voice", edge_voice),
+                        output_path=job["path"],
+                        section_type=job["type"],
+                        skip_bgm=skip_bgm,
+                    )
+                result["variant_id"] = job["variant_id"]
+                result["type"] = job["type"]
+                result["theme"] = job.get("theme", "")
+                result["voice_index"] = job.get("voice_index", 1)
+                result["voice_label"] = job.get("voice_label", "Voice 1")
+                return result
+            except Exception as e:
+                logger.error(f"[{self.name}] Failed {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}: {e}")
+                return {
+                    "variant_id": job["variant_id"],
+                    "type": job["type"],
+                    "theme": job.get("theme", ""),
+                    "voice_index": job.get("voice_index", 1),
+                    "voice_label": job.get("voice_label", "Voice 1"),
+                    "error": str(e),
+                }
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def _limited(job: dict[str, Any]) -> dict[str, Any]:
+            async with semaphore:
+                return await _tts_job(job)
+
+        results = list(await asyncio.gather(*[_limited(j) for j in jobs]))
+        successful = [r for r in results if "error" not in r]
+        failed = [r for r in results if "error" in r]
+        return successful, failed
+
+    def _attach_voice_info(
+        self, job: dict[str, Any], tts_engine: str, voice_pool: list[Any], voice_idx: int
+    ) -> None:
+        """Attach engine-specific voice info to a job dict in-place."""
+        if tts_engine == "murf":
+            vid, loc, sty, lbl = voice_pool[voice_idx]
+            job.update(murf_voice_id=vid, murf_locale=loc, murf_style=sty, voice_label=lbl)
+        elif tts_engine == "edge-tts":
+            eid, lbl = voice_pool[voice_idx]
+            job.update(edge_voice=eid, voice_label=lbl)
+        else:
+            eid, lbl = voice_pool[voice_idx]
+            job.update(el_voice_id=eid, voice_label=lbl)
+
+    async def run_hook_previews(
+        self,
+        scripts: dict[str, Any],
+        voice_selection: dict[str, Any],
+        session_id: str | None = None,
+        country: str = "",
+        language: str | None = None,
+        tts_engine_override: str | None = None,
+    ) -> dict[str, Any]:
+        """Phase 1: Generate hook-only previews with 3 voices per variant (no BGM).
+
+        Returns metadata for each preview so the user can listen and pick a voice.
+        """
+        session_id = session_id or str(uuid.uuid4())[:8]
+        session_dir = OUTPUTS_DIR / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        ctx = self._resolve_engine_and_voices(
+            voice_selection, country, language, tts_engine_override
+        )
+        tts_engine = ctx["tts_engine"]
+        voice_pool = ctx["voice_pool"]
+
+        if tts_engine == "elevenlabs":
+            ctx["el_voice_id"] = await self._validate_voice_id(ctx["el_voice_id"])
+
+        logger.info(f"[{self.name}] Phase 1: hook previews via {tts_engine}")
+
+        script_list = scripts.get("scripts", [])
+        jobs: list[dict[str, Any]] = []
+
+        for script in script_list:
+            variant_id = script.get("variant_id", 0)
+            hook_text = script.get("hook", "")
+            if not hook_text or not hook_text.strip():
+                hook_text = script.get("full_script", "")[:200]
+
+            for voice_idx in range(3):
+                job: dict[str, Any] = {
+                    "text": hook_text,
+                    "path": session_dir / f"variant_{variant_id}_voice{voice_idx + 1}_hook_preview.mp3",
+                    "variant_id": variant_id,
+                    "type": "hook_preview",
+                    "theme": script.get("theme", ""),
+                    "voice_index": voice_idx + 1,
+                    "skip_bgm": True,
+                }
+                self._attach_voice_info(job, tts_engine, voice_pool, voice_idx)
+                jobs.append(job)
+
+        logger.info(f"[{self.name}] Generating {len(jobs)} hook previews")
+        successful, failed = await self._run_tts_jobs(jobs, tts_engine, ctx)
+
+        logger.info(
+            f"[{self.name}] Hook previews done: {len(successful)} ok, {len(failed)} failed"
+        )
+
+        return {
+            "session_id": session_id,
+            "session_dir": str(session_dir),
+            "tts_engine": tts_engine,
+            "voice_pool": [
+                {"voice_index": i + 1, "label": self._voice_label(tts_engine, voice_pool, i)}
+                for i in range(min(3, len(voice_pool)))
+            ],
+            "audio_files": successful,
+            "failed_files": failed,
+            "phase": "hook_previews",
+        }
+
+    @staticmethod
+    def _voice_label(tts_engine: str, voice_pool: list[Any], idx: int) -> str:
+        if tts_engine == "murf":
+            return voice_pool[idx][3]
+        return voice_pool[idx][1]
+
+    async def run_final_audio(
+        self,
+        scripts: dict[str, Any],
+        voice_selection: dict[str, Any],
+        voice_choices: dict[int, int],
+        session_id: str,
+        country: str = "",
+        language: str | None = None,
+        tts_engine_override: str | None = None,
+    ) -> dict[str, Any]:
+        """Phase 2: Generate full audio for each variant using the chosen voice.
+
+        Args:
+            voice_choices: mapping of variant_id -> voice_index (1-based).
+        """
+        session_dir = OUTPUTS_DIR / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        ctx = self._resolve_engine_and_voices(
+            voice_selection, country, language, tts_engine_override
+        )
+        tts_engine = ctx["tts_engine"]
+        voice_pool = ctx["voice_pool"]
+
+        if tts_engine == "elevenlabs":
+            ctx["el_voice_id"] = await self._validate_voice_id(ctx["el_voice_id"])
+
+        logger.info(f"[{self.name}] Phase 2: full audio via {tts_engine}, choices={voice_choices}")
+
+        ALL_SECTIONS = [
+            ("full_script", "main"),
+            ("fallback_1", "fallback1"),
+            ("fallback_2", "fallback2"),
+            ("polite_closure", "closure"),
+        ]
+
+        script_list = scripts.get("scripts", [])
+        jobs: list[dict[str, Any]] = []
+
+        for script in script_list:
+            variant_id = script.get("variant_id", 0)
+            chosen_voice = voice_choices.get(variant_id, 1)
+            voice_idx = max(0, min(chosen_voice - 1, len(voice_pool) - 1))
+
+            for field, audio_type in ALL_SECTIONS:
+                text = script.get(field, "")
+                if not text or not text.strip():
+                    continue
+                job: dict[str, Any] = {
+                    "text": text,
+                    "path": session_dir / f"variant_{variant_id}_{audio_type}.mp3",
+                    "variant_id": variant_id,
+                    "type": audio_type,
+                    "theme": script.get("theme", ""),
+                    "voice_index": chosen_voice,
+                }
+                self._attach_voice_info(job, tts_engine, voice_pool, voice_idx)
+                jobs.append(job)
+
+        logger.info(f"[{self.name}] Generating {len(jobs)} final audio files")
+        successful, failed = await self._run_tts_jobs(jobs, tts_engine, ctx)
+
+        logger.info(
+            f"[{self.name}] Final audio complete: {len(successful)} ok, {len(failed)} failed via {tts_engine}"
+        )
+
+        voice_id_used = ctx["murf_voice_id"] or ctx["el_voice_id"] or ctx["edge_voice"]
+        return {
+            "session_id": session_id,
+            "session_dir": str(session_dir),
+            "tts_engine": tts_engine,
+            "voice_used": {
+                "voice_id": voice_id_used,
+                "name": ctx["voice_name"],
+                "settings": ctx["voice_settings"],
+            },
+            "audio_files": successful,
+            "failed_files": failed,
+            "summary": {
+                "total_generated": len(successful),
+                "total_failed": len(failed),
+                "variants_count": len(script_list),
+                "has_background_music": True,
+                "output_quality": "stereo 320kbps 44.1kHz",
+            },
+        }
+
     async def run(
         self,
         scripts: dict[str, Any],
@@ -767,7 +1084,7 @@ class AudioProducerAgent(BaseAgent):
         tts_engine_override: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Generate broadcast-quality audio for all script variants."""
+        """Generate broadcast-quality audio for all script variants (legacy full run)."""
         voice_settings = voice_selection.get("voice_settings", {})
         voice_name = voice_selection.get("selected_voice", {}).get("name", "Unknown")
 

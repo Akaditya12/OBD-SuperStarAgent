@@ -141,4 +141,30 @@ To use: Upload the product file in the UI, select your target country and telco,
 2. Set environment variables in the Render dashboard (see table above); do not commit `.env`.
 3. Deploy uses the repo’s `Dockerfile` and `render-start.sh`. Health check: `/api/health`.
 
+## Deploy to Streamlit Community Cloud
+
+The `streamlit-app` branch contains a Streamlit-based version of the app.
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) and connect the GitHub repo.
+2. Set **Branch** to `streamlit-app` and **Main file path** to `streamlit_app/app.py`.
+3. Add secrets in the Streamlit Cloud dashboard (Settings > Secrets):
+   ```toml
+   ADMIN_USERNAME = "admin"
+   ADMIN_PASSWORD = "your-secure-password"
+   AZURE_OPENAI_API_KEY = "..."
+   AZURE_OPENAI_ENDPOINT = "..."
+   AZURE_OPENAI_DEPLOYMENT = "gpt-5.1-chat"
+   AZURE_OPENAI_API_VERSION = "2025-01-01-preview"
+   MURF_API_KEY = "..."
+   ELEVENLABS_API_KEY = "..."
+   ```
+4. Deploy. The admin account is auto-created from secrets on first run.
+
+### Streamlit App Features
+
+- **2-Phase Audio**: Hook previews with 3 voices per variant, then full audio with your chosen voice
+- **Admin Auth**: SQLite-based user management -- admin creates accounts for teams
+- **Script Editing**: Edit scripts inline before generating final audio
+- **Pages**: Generate, Dashboard, Admin (admin-only)
+
 See **`PROJECT.md`** for continuity (running without Cursor, where progress is saved, how to extend the project).
