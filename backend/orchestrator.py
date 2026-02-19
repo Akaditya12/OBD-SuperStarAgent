@@ -65,6 +65,7 @@ class PipelineOrchestrator:
         country: str,
         telco: str,
         language: str | None = None,
+        tts_engine: str | None = None,
     ) -> dict[str, Any]:
         """Execute the full pipeline.
 
@@ -230,6 +231,7 @@ class PipelineOrchestrator:
                     session_id=session_id,
                     country=country,
                     language=language,
+                    tts_engine_override=tts_engine,
                 )
                 results["audio"] = audio_result
                 successful = audio_result.get("summary", {}).get("total_generated", 0)

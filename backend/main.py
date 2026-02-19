@@ -113,6 +113,7 @@ async def _run_pipeline_bg(
     telco: str,
     language: Optional[str],
     provider: Optional[str],
+    tts_engine: Optional[str] = None,
 ) -> None:
     """Run the pipeline as a background task, storing progress in state."""
 
@@ -147,11 +148,13 @@ async def _run_pipeline_bg(
             country=country,
             telco=telco,
             language=language,
+            tts_engine=tts_engine,
         )
         session_id = result.get("session_id", state.session_id)
         result["country"] = country
         result["telco"] = telco
         result["language"] = language or ""
+        result["tts_engine_choice"] = tts_engine or ""
         sessions[session_id] = result
         # Also store under the pipeline's session_id so the frontend can find it
         if state.session_id != session_id:
@@ -345,6 +348,7 @@ async def start_pipeline(request: Request):
     telco = body.get("telco", "")
     language = body.get("language")
     provider = body.get("provider")
+    tts_engine = body.get("tts_engine")
 
     if not product_text or not country or not telco:
         return JSONResponse(
@@ -357,7 +361,7 @@ async def start_pipeline(request: Request):
     pipelines[session_id] = state
 
     task = asyncio.create_task(
-        _run_pipeline_bg(state, product_text, country, telco, language, provider)
+        _run_pipeline_bg(state, product_text, country, telco, language, provider, tts_engine)
     )
     state.task = task
 
@@ -515,6 +519,117 @@ async def download_scripts(session_id: str, fmt: str = "json"):
             "content": json.dumps(final_scripts, indent=2),
         },
     )
+
+
+# ── Script Editing Endpoints ──
+
+
+@app.put("/api/sessions/{session_id}/scripts/{variant_id}")
+async def update_script(session_id: str, variant_id: int, request: Request):
+    """Update a single script variant in a session (in-memory)."""
+    if session_id not in sessions:
+        return JSONResponse(status_code=404, content={"error": "Session not found"})
+
+    body = await request.json()
+    result = sessions[session_id]
+
+    final_scripts = result.get("final_scripts") or result.get("revised_scripts_round_1") or result.get("initial_scripts")
+    if not final_scripts:
+        return JSONResponse(status_code=404, content={"error": "No scripts in session"})
+
+    scripts = final_scripts.get("scripts", [])
+    target = None
+    for s in scripts:
+        if s.get("variant_id") == variant_id:
+            target = s
+            break
+
+    if not target:
+        return JSONResponse(status_code=404, content={"error": f"Variant {variant_id} not found"})
+
+    editable_fields = ("hook", "body", "cta", "full_script", "fallback_1", "fallback_2", "polite_closure")
+    for field in editable_fields:
+        if field in body:
+            target[field] = body[field]
+
+    word_count = len(target.get("full_script", "").split())
+    target["word_count"] = word_count
+    target["estimated_duration_seconds"] = round(word_count / 2.5, 1)
+
+    logger.info(f"Updated script variant {variant_id} in session {session_id}")
+    return {"status": "ok", "script": target}
+
+
+@app.post("/api/sessions/{session_id}/regenerate-audio/{variant_id}")
+async def regenerate_audio(session_id: str, variant_id: int, request: Request):
+    """Regenerate audio files for a single script variant."""
+    if session_id not in sessions:
+        return JSONResponse(status_code=404, content={"error": "Session not found"})
+
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    tts_engine_choice = body.get("tts_engine")
+
+    result = sessions[session_id]
+    country = result.get("country", "")
+    language_val = result.get("language") or None
+
+    final_scripts = result.get("final_scripts") or result.get("revised_scripts_round_1") or result.get("initial_scripts")
+    if not final_scripts:
+        return JSONResponse(status_code=404, content={"error": "No scripts in session"})
+
+    target_script = None
+    for s in final_scripts.get("scripts", []):
+        if s.get("variant_id") == variant_id:
+            target_script = s
+            break
+
+    if not target_script:
+        return JSONResponse(status_code=404, content={"error": f"Variant {variant_id} not found"})
+
+    voice_selection = result.get("voice_selection", {
+        "selected_voice": {"voice_id": "", "name": "default"},
+        "voice_settings": {},
+    })
+
+    single_scripts = {"scripts": [target_script]}
+
+    from backend.agents import AudioProducerAgent
+    producer = AudioProducerAgent()
+    try:
+        audio_result = await producer.run(
+            scripts=single_scripts,
+            voice_selection=voice_selection,
+            session_id=session_id,
+            country=country,
+            language=language_val,
+            tts_engine_override=tts_engine_choice,
+        )
+
+        new_files = audio_result.get("audio_files", [])
+
+        # Update the session's audio data
+        if "audio" not in result:
+            result["audio"] = audio_result
+        else:
+            existing = result["audio"]
+            existing["audio_files"] = [
+                af for af in existing.get("audio_files", [])
+                if af.get("variant_id") != variant_id
+            ] + new_files
+            existing["summary"]["total_generated"] = len([
+                f for f in existing["audio_files"] if "error" not in f
+            ])
+
+        logger.info(f"Regenerated {len(new_files)} audio files for variant {variant_id}")
+        return {
+            "status": "ok",
+            "audio_files": new_files,
+            "tts_engine": audio_result.get("tts_engine"),
+        }
+
+    except Exception as e:
+        logger.error(f"Audio regeneration failed for variant {variant_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ── Campaign Endpoints ──
@@ -817,6 +932,7 @@ async def websocket_generate(ws: WebSocket):
         telco = config.get("telco", "")
         language = config.get("language")
         provider = config.get("provider")
+        tts_engine = config.get("tts_engine")
 
         if not product_text or not country or not telco:
             await ws.send_json({
@@ -852,13 +968,14 @@ async def websocket_generate(ws: WebSocket):
             country=country,
             telco=telco,
             language=language,
+            tts_engine=tts_engine,
         )
 
         session_id = result.get("session_id", "unknown")
-        # Store input params alongside result for campaign saving
         result["country"] = country
         result["telco"] = telco
         result["language"] = language or ""
+        result["tts_engine_choice"] = tts_engine or ""
         sessions[session_id] = result
 
         # Send the final result -- distinguish success vs failure

@@ -91,12 +91,14 @@ export interface AudioFile {
   voice_id?: string;
   model?: string;
   error?: string;
+  voice_index?: number;
+  voice_label?: string;
 }
 
 export interface AudioResult {
   session_id: string;
   session_dir: string;
-  tts_engine?: "elevenlabs" | "edge-tts";
+  tts_engine?: "elevenlabs" | "edge-tts" | "murf";
   voice_used: {
     voice_id: string;
     name: string;

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Play,
+  Pause,
   FileText,
   Volume2,
   Download,
@@ -17,6 +18,10 @@ import {
   RotateCcw,
   Copy,
   Check,
+  Pencil,
+  X,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import ProductUpload from "@/components/ProductUpload";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
@@ -64,6 +69,7 @@ export default function HomePage() {
   const [telco, setTelco] = useState("");
   const [language, setLanguage] = useState("");
   const [promotionType, setPromotionType] = useState("obd_standard");
+  const [ttsEngine, setTtsEngine] = useState<"auto" | "murf" | "elevenlabs" | "edge-tts">("auto");
 
   // Handle ?product= URL param from sidebar clicks
   useEffect(() => {
@@ -96,9 +102,16 @@ export default function HomePage() {
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Script expand
+  // Script expand & edit
   const [expandedScript, setExpandedScript] = useState<number | null>(null);
   const [copiedScript, setCopiedScript] = useState<number | null>(null);
+  const [editingVariant, setEditingVariant] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<Record<string, string>>({});
+  const [editedVariants, setEditedVariants] = useState<Set<number>>(new Set());
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Audio regeneration
+  const [regenVariant, setRegenVariant] = useState<number | null>(null);
 
   // WebSocket ref
   const wsRef = useRef<WebSocket | null>(null);
@@ -249,6 +262,7 @@ export default function HomePage() {
           country,
           telco,
           language: language || undefined,
+          tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
         }),
       });
 
@@ -317,6 +331,106 @@ export default function HomePage() {
     setCopiedScript(idx);
     toast("info", "Script copied to clipboard");
     setTimeout(() => setCopiedScript(null), 2000);
+  };
+
+  // ── Script editing ──
+  const startEditing = (script: Script) => {
+    const vid = script.variant_id;
+    setEditingVariant(vid);
+    setEditDraft({
+      hook: script.hook || "",
+      body: script.body || "",
+      cta: script.cta || "",
+      full_script: script.full_script || "",
+      fallback_1: script.fallback_1 || "",
+      fallback_2: script.fallback_2 || "",
+      polite_closure: script.polite_closure || "",
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingVariant(null);
+    setEditDraft({});
+  };
+
+  const saveEdit = async (variantId: number) => {
+    if (!result?.session_id) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(
+        `/api/sessions/${result.session_id}/scripts/${variantId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(editDraft),
+        }
+      );
+      if (res.ok) {
+        const { script: updated } = await res.json();
+        // Update local state
+        const updateScripts = (sr: typeof result.final_scripts) => {
+          if (!sr?.scripts) return;
+          const idx = sr.scripts.findIndex((s) => s.variant_id === variantId);
+          if (idx >= 0) sr.scripts[idx] = { ...sr.scripts[idx], ...updated };
+        };
+        if (result.final_scripts) updateScripts(result.final_scripts);
+        if (result.revised_scripts_round_1) updateScripts(result.revised_scripts_round_1);
+        if (result.initial_scripts) updateScripts(result.initial_scripts);
+        setResult({ ...result });
+        setEditedVariants((prev) => new Set(prev).add(variantId));
+        setEditingVariant(null);
+        setEditDraft({});
+        toast("success", "Script updated");
+      } else {
+        toast("error", "Failed to save script");
+      }
+    } catch {
+      toast("error", "Failed to save script");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // ── Regenerate audio for a single variant ──
+  const regenerateAudio = async (variantId: number) => {
+    if (!result?.session_id) return;
+    setRegenVariant(variantId);
+    try {
+      const res = await fetch(
+        `/api/sessions/${result.session_id}/regenerate-audio/${variantId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
+          }),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const newFiles: AudioFile[] = data.audio_files || [];
+        // Replace old audio files for this variant
+        const existingAudio = result.audio || { session_id: result.session_id, session_dir: "", voice_used: { voice_id: "", name: "", settings: {} as any }, audio_files: [], summary: { total_generated: 0, total_failed: 0, variants_count: 0 } };
+        const otherFiles = (existingAudio.audio_files || []).filter(
+          (af: AudioFile) => af.variant_id !== variantId
+        );
+        existingAudio.audio_files = [...otherFiles, ...newFiles];
+        existingAudio.summary.total_generated = existingAudio.audio_files.filter((f: AudioFile) => !f.error).length;
+        setResult({ ...result, audio: { ...existingAudio } });
+        setEditedVariants((prev) => {
+          const next = new Set(prev);
+          next.delete(variantId);
+          return next;
+        });
+        toast("success", `Audio regenerated for Variant ${variantId}`);
+      } else {
+        toast("error", "Failed to regenerate audio");
+      }
+    } catch {
+      toast("error", "Failed to regenerate audio");
+    } finally {
+      setRegenVariant(null);
+    }
   };
 
   // ── Reset ──
@@ -481,6 +595,38 @@ export default function HomePage() {
               />
             </div>
 
+            {/* TTS Engine */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
+              <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-3">
+                <Volume2 className="w-4 h-4 text-[var(--accent)]" />
+                Voice Engine
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {([
+                  { id: "auto", label: "Auto", desc: "Best available" },
+                  { id: "murf", label: "Murf AI", desc: "Premium" },
+                  { id: "elevenlabs", label: "ElevenLabs", desc: "Premium" },
+                  { id: "edge-tts", label: "Free TTS", desc: "edge-tts" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setTtsEngine(opt.id)}
+                    className={`px-3 py-2.5 rounded-xl text-left border transition-all ${
+                      ttsEngine === opt.id
+                        ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
+                        : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
+                    }`}
+                  >
+                    <div className={`text-xs font-medium ${ttsEngine === opt.id ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-tertiary)]">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Start button */}
             <button
               onClick={handleStart}
@@ -590,127 +736,234 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-              {scripts.map((script: Script, idx: number) => (
-                <div
-                  key={idx}
-                  className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden hover:border-[var(--card-border-hover)] transition-colors"
-                >
-                  <button
-                    className="w-full flex items-center justify-between px-5 py-4 text-left"
-                    onClick={() =>
-                      setExpandedScript(expandedScript === idx ? null : idx)
-                    }
+              {scripts.map((script: Script, idx: number) => {
+                const vid = script.variant_id || idx + 1;
+                const isEditing = editingVariant === vid;
+                const isEdited = editedVariants.has(vid);
+                const SECTIONS = ["hook", "body", "cta", "full_script", "fallback_1", "fallback_2", "polite_closure"] as const;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-colors ${
+                      isEdited
+                        ? "border-amber-500/40 bg-amber-500/5"
+                        : "border-[var(--card-border)] hover:border-[var(--card-border-hover)]"
+                    }`}
                   >
-                    <div>
-                      <span className="text-sm font-medium text-[var(--text-primary)]">
-                        Variant {script.variant_id || idx + 1}
-                      </span>
-                      <span className="text-xs text-[var(--text-tertiary)] ml-3">
-                        {script.theme || ""}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-[var(--text-tertiary)] bg-[var(--input-bg)] px-2 py-0.5 rounded-full">
-                        {script.word_count || "?"} words
-                      </span>
-                      {expandedScript === idx ? (
-                        <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
-                      )}
-                    </div>
-                  </button>
-                  {expandedScript === idx && (
-                    <div className="px-5 pb-5 space-y-3 animate-fade-in border-t border-[var(--card-border)]">
-                      {(["hook", "body", "cta", "full_script"] as const).map(
-                        (section) =>
-                          script[section] && (
+                    <button
+                      className="w-full flex items-center justify-between px-5 py-4 text-left"
+                      onClick={() =>
+                        setExpandedScript(expandedScript === idx ? null : idx)
+                      }
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-[var(--text-primary)]">
+                          Variant {vid}
+                        </span>
+                        <span className="text-xs text-[var(--text-tertiary)]">
+                          {script.theme || ""}
+                        </span>
+                        {isEdited && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">
+                            edited
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[var(--text-tertiary)] bg-[var(--input-bg)] px-2 py-0.5 rounded-full">
+                          {script.word_count || "?"} words
+                        </span>
+                        {expandedScript === idx ? (
+                          <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
+                        )}
+                      </div>
+                    </button>
+                    {expandedScript === idx && (
+                      <div className="px-5 pb-5 space-y-3 animate-fade-in border-t border-[var(--card-border)]">
+                        {/* Edit / Regen toolbar */}
+                        <div className="flex items-center gap-2 pt-2">
+                          {!isEditing ? (
+                            <button
+                              onClick={() => startEditing(script)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              Edit Script
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => saveEdit(vid)}
+                                disabled={savingEdit}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)] text-white hover:opacity-90 transition-colors disabled:opacity-50"
+                              >
+                                {savingEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                Save
+                              </button>
+                              <button
+                                onClick={cancelEditing}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-red-500/10 border border-[var(--card-border)] transition-colors"
+                              >
+                                <X className="w-3 h-3" />
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                          {isEdited && !isEditing && (
+                            <button
+                              onClick={() => regenerateAudio(vid)}
+                              disabled={regenVariant === vid}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-amber-400 hover:bg-amber-500/10 border border-amber-500/30 transition-colors disabled:opacity-50"
+                            >
+                              {regenVariant === vid ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                              Re-generate Audio
+                            </button>
+                          )}
+                        </div>
+
+                        {SECTIONS.map((section) => {
+                          const value = isEditing ? (editDraft[section] ?? "") : (script[section] || "");
+                          if (!value && !isEditing) return null;
+                          return (
                             <div key={section}>
                               <div className="flex items-center justify-between mb-1">
                                 <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                                  {section.replace("_", " ")}
+                                  {section.replace(/_/g, " ")}
                                 </span>
-                                <button
-                                  onClick={() =>
-                                    copyScript(script[section], idx)
-                                  }
-                                  className="p-1 rounded hover:bg-[var(--accent-subtle)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
-                                >
-                                  {copiedScript === idx ? (
-                                    <Check className="w-3 h-3 text-[var(--success)]" />
-                                  ) : (
-                                    <Copy className="w-3 h-3" />
-                                  )}
-                                </button>
+                                {!isEditing && (
+                                  <button
+                                    onClick={() => copyScript(script[section], idx)}
+                                    className="p-1 rounded hover:bg-[var(--accent-subtle)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+                                  >
+                                    {copiedScript === idx ? (
+                                      <Check className="w-3 h-3 text-[var(--success)]" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                )}
                               </div>
-                              <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--input-bg)] px-3 py-2 rounded-lg">
-                                {script[section]}
-                              </p>
+                              {isEditing ? (
+                                <textarea
+                                  value={editDraft[section] ?? ""}
+                                  onChange={(e) =>
+                                    setEditDraft((prev) => ({ ...prev, [section]: e.target.value }))
+                                  }
+                                  rows={section === "full_script" ? 5 : 3}
+                                  className="w-full text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--input-bg)] px-3 py-2 rounded-lg border border-[var(--card-border)] focus:border-[var(--accent)]/50 focus:outline-none resize-y"
+                                />
+                              ) : (
+                                <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--input-bg)] px-3 py-2 rounded-lg">
+                                  {value}
+                                </p>
+                              )}
                             </div>
-                          )
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {/* Audio */}
-          {audioFiles.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-[var(--accent)]" />
-                Audio Files
-                {result?.audio?.tts_engine && (
-                  <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)]">
-                    {result.audio.tts_engine === "murf" ? "Murf AI" : result.audio.tts_engine === "edge-tts" ? "Free TTS" : "ElevenLabs"}
-                  </span>
-                )}
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {audioFiles.map(
-                  (af: AudioFile, i: number) => {
-                    const audioSessionId = result?.audio?.session_id || result?.session_id || "";
-                    const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
-                    return (
-                      <div
-                        key={i}
-                        className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors"
-                      >
-                        <button
-                          onClick={() => toggleAudio(audioUrl)}
-                          className={`p-2.5 rounded-xl transition-colors ${playingAudio === audioUrl
-                            ? "bg-[var(--accent)] text-white"
-                            : "bg-[var(--accent-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                            }`}
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-[var(--text-primary)] truncate">
-                            {af.file_name}
-                          </p>
-                          {af.file_size_bytes && (
-                            <p className="text-[10px] text-[var(--text-tertiary)]">
-                              {(af.file_size_bytes / 1024).toFixed(1)} KB
-                            </p>
-                          )}
-                        </div>
-                        <a
-                          href={audioUrl}
-                          download
-                          className="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </a>
+          {/* Audio -- grouped by variant with voice tabs */}
+          {audioFiles.length > 0 && (() => {
+            const audioSessionId = result?.audio?.session_id || result?.session_id || "";
+            const variantIds = [...new Set(audioFiles.map((af: AudioFile) => af.variant_id))].sort((a, b) => a - b);
+
+            return (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-[var(--accent)]" />
+                  Audio Files
+                  {result?.audio?.tts_engine && (
+                    <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)]">
+                      {result.audio.tts_engine === "murf" ? "Murf AI" : result.audio.tts_engine === "edge-tts" ? "Free TTS" : "ElevenLabs"}
+                    </span>
+                  )}
+                </h3>
+                {variantIds.map((vid) => {
+                  const variantFiles = audioFiles.filter((af: AudioFile) => af.variant_id === vid);
+                  const voiceIndices = [...new Set(variantFiles.map((af: AudioFile) => af.voice_index || 1))].sort();
+                  const hasMultiVoice = voiceIndices.length > 1;
+
+                  return (
+                    <div key={vid} className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden">
+                      <div className="px-5 py-3 border-b border-[var(--card-border)] bg-[var(--input-bg)]/50">
+                        <span className="text-xs font-medium text-[var(--text-primary)]">
+                          Variant {vid}
+                        </span>
+                        <span className="text-[10px] text-[var(--text-tertiary)] ml-2">
+                          {variantFiles.length} files
+                        </span>
                       </div>
-                    );
-                  }
-                )}
+                      <div className="p-4 space-y-3">
+                        {voiceIndices.map((voiceIdx) => {
+                          const voiceFiles = variantFiles.filter((af: AudioFile) => (af.voice_index || 1) === voiceIdx);
+                          const voiceLabel = voiceFiles[0]?.voice_label || `Voice ${voiceIdx}`;
+
+                          return (
+                            <div key={voiceIdx}>
+                              {hasMultiVoice && (
+                                <div className="text-[10px] font-medium text-[var(--accent)] mb-1.5 uppercase tracking-wider">
+                                  {voiceLabel}
+                                </div>
+                              )}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {voiceFiles.map((af: AudioFile, i: number) => {
+                                  const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
+                                  const isPlaying = playingAudio === audioUrl;
+                                  return (
+                                    <div
+                                      key={i}
+                                      className="flex items-center gap-2.5 p-3 rounded-xl bg-[var(--input-bg)] hover:bg-[var(--accent-subtle)]/30 transition-colors"
+                                    >
+                                      <button
+                                        onClick={() => toggleAudio(audioUrl)}
+                                        className={`p-2 rounded-lg transition-colors ${
+                                          isPlaying
+                                            ? "bg-[var(--accent)] text-white"
+                                            : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                        }`}
+                                      >
+                                        {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                                      </button>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[11px] font-medium text-[var(--text-primary)] truncate">
+                                          {af.type}
+                                        </p>
+                                        {af.file_size_bytes && (
+                                          <p className="text-[10px] text-[var(--text-tertiary)]">
+                                            {(af.file_size_bytes / 1024).toFixed(0)} KB
+                                          </p>
+                                        )}
+                                      </div>
+                                      <a
+                                        href={audioUrl}
+                                        download
+                                        className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--card)] transition-colors"
+                                      >
+                                        <Download className="w-3 h-3" />
+                                      </a>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Save campaign */}
           {result && !error && (
