@@ -270,9 +270,9 @@ MURF_VOICE_POOL: dict[str, list[tuple[str, str, str, str]]] = {
         ("en-US-zion", "en-US", "Conversational", "Zion (Male)"),
     ],
     "french": [
-        ("fr-FR-justine", "fr-FR", "Promo", "Justine (Female)"),
-        ("fr-FR-xavier", "fr-FR", "Conversational", "Xavier (Male)"),
-        ("en-US-samantha", "en-US", "Promo", "Samantha (Female)"),
+        ("fr-FR-adélie", "fr-FR", "Narration", "Adélie (Female)"),
+        ("fr-FR-axel", "fr-FR", "Narration", "Axel (Male)"),
+        ("fr-FR-louise", "fr-FR", "Narration", "Louise (Female)"),
     ],
     "portuguese": [
         ("pt-BR-isadora", "pt-BR", "Conversational", "Isadora (Female)"),
@@ -299,6 +299,12 @@ def _get_edge_voice_pool(country: str, language: str | None) -> list[tuple[str, 
 
     if locale in EDGE_VOICE_POOL:
         return EDGE_VOICE_POOL[locale]
+
+    # Fallback: fr-CM -> fr-FR, pt-MZ -> pt-BR, etc.
+    lang_prefix = locale.split("-")[0] if locale else ""
+    for pool_locale in EDGE_VOICE_POOL:
+        if pool_locale.startswith(lang_prefix + "-"):
+            return EDGE_VOICE_POOL[pool_locale]
 
     primary = EDGE_VOICE_MAP.get(locale, "en-US-AriaNeural")
     return [(primary, "Voice 1"), (primary, "Voice 2"), (primary, "Voice 3")]
@@ -360,7 +366,7 @@ MURF_VOICE_MAP: dict[str, tuple[str, str, str]] = {
     "punjabi":    ("en-IN-arohi",    "en-IN",  "Promo"),
     "gujarati":   ("bn-IN-anwesha",  "gu-IN",  "Conversational"),
     "english":    ("en-IN-arohi",    "en-IN",  "Promo"),
-    "french":     ("fr-FR-justine",  "fr-FR",  "Promo"),
+    "french":     ("fr-FR-adélie",   "fr-FR",  "Narration"),
     "portuguese": ("pt-BR-isadora",  "pt-BR",  "Conversational"),
     "indonesian": ("en-US-zion",     "id-ID",  "Conversational"),
     "filipino":   ("en-IN-arohi",    "en-IN",  "Promo"),
@@ -376,9 +382,9 @@ MURF_COUNTRY_VOICE: dict[str, tuple[str, str, str]] = {
     "South Africa":("en-US-samantha", "en-US",  "Promo"),
     "Ghana":       ("en-US-samantha", "en-US",  "Promo"),
     "Ethiopia":    ("en-US-samantha", "en-US",  "Promo"),
-    "Cameroon":    ("fr-FR-justine",  "fr-FR",  "Promo"),
-    "Senegal":     ("fr-FR-justine",  "fr-FR",  "Promo"),
-    "Congo (DRC)": ("fr-FR-justine",  "fr-FR",  "Promo"),
+    "Cameroon":    ("fr-FR-adélie",   "fr-FR",  "Narration"),
+    "Senegal":     ("fr-FR-adélie",   "fr-FR",  "Narration"),
+    "Congo (DRC)": ("fr-FR-adélie",   "fr-FR",  "Narration"),
     "Mozambique":  ("pt-BR-isadora",  "pt-BR",  "Conversational"),
     "Bangladesh":  ("bn-IN-anwesha",  "bn-IN",  "Conversational"),
     "Pakistan":    ("en-US-samantha", "en-US",  "Promo"),
@@ -1104,6 +1110,52 @@ class AudioProducerAgent(BaseAgent):
         successful = [r for r in results if "error" not in r]
         failed = [r for r in results if "error" in r]
 
+        # Auto-fallback: if ALL jobs failed, retry with next available engine
+        if len(successful) == 0 and len(failed) > 0:
+            fallback_order = ["murf", "edge-tts"]
+            for fb_engine in fallback_order:
+                if fb_engine == tts_engine:
+                    continue
+                if fb_engine == "murf" and not MURF_API_KEY:
+                    continue
+                logger.warning(
+                    f"[{self.name}] All {len(failed)} previews failed via {tts_engine}; "
+                    f"retrying with {fb_engine}"
+                )
+                engine_ctx = await self._resolve_engine(
+                    voice_selection, country, language, fb_engine
+                )
+                tts_engine = engine_ctx["tts_engine"]
+                voice_pool = engine_ctx["voice_pool"]
+
+                retry_jobs: list[dict[str, Any]] = []
+                for script in script_list:
+                    variant_id = script.get("variant_id", 0)
+                    theme = script.get("theme", "unknown")
+                    hook_text = script.get("hook", "") or ""
+                    if not hook_text.strip():
+                        hook_text = (script.get("full_script", "") or "")[:200]
+                    if not hook_text.strip():
+                        continue
+                    for vi in range(min(3, len(voice_pool))):
+                        rj: dict[str, Any] = {
+                            "text": hook_text,
+                            "path": session_dir / f"variant_{variant_id}_voice{vi + 1}_hook_preview.mp3",
+                            "variant_id": variant_id,
+                            "type": "hook_preview",
+                            "theme": theme,
+                            "voice_index": vi + 1,
+                            "skip_bgm": False,
+                        }
+                        rj.update(voice_pool[vi])
+                        retry_jobs.append(rj)
+
+                results = await self._run_tts_jobs(retry_jobs, engine_ctx)
+                successful = [r for r in results if "error" not in r]
+                failed = [r for r in results if "error" in r]
+                if len(successful) > 0:
+                    break
+
         logger.info(
             f"[{self.name}] Hook previews done: {len(successful)} ok, {len(failed)} failed"
         )
@@ -1192,6 +1244,49 @@ class AudioProducerAgent(BaseAgent):
 
         successful = [r for r in results if "error" not in r]
         failed = [r for r in results if "error" in r]
+
+        # Auto-fallback: if ALL jobs failed, retry with next available engine
+        if len(successful) == 0 and len(failed) > 0:
+            for fb_engine in ["murf", "edge-tts"]:
+                if fb_engine == tts_engine:
+                    continue
+                if fb_engine == "murf" and not MURF_API_KEY:
+                    continue
+                logger.warning(
+                    f"[{self.name}] All {len(failed)} final audio failed via {tts_engine}; "
+                    f"retrying with {fb_engine}"
+                )
+                engine_ctx = await self._resolve_engine(
+                    voice_selection, country, language, fb_engine
+                )
+                tts_engine = engine_ctx["tts_engine"]
+                voice_pool = engine_ctx["voice_pool"]
+                retry_jobs: list[dict[str, Any]] = []
+                for script in script_list:
+                    variant_id = script.get("variant_id", 0)
+                    theme = script.get("theme", "unknown")
+                    chosen_idx = max(0, min(voice_choices.get(variant_id, 1) - 1, len(voice_pool) - 1))
+                    for field, audio_type in ALL_SECTIONS:
+                        text = script.get(field, "")
+                        if not text or not text.strip():
+                            continue
+                        rj: dict[str, Any] = {
+                            "text": text,
+                            "path": session_dir / f"variant_{variant_id}_voice{chosen_idx + 1}_{audio_type}.mp3",
+                            "variant_id": variant_id,
+                            "type": audio_type,
+                            "theme": theme,
+                            "voice_index": chosen_idx + 1,
+                            "skip_bgm": False,
+                            "bgm_style": bgm_style,
+                        }
+                        rj.update(voice_pool[chosen_idx])
+                        retry_jobs.append(rj)
+                results = await self._run_tts_jobs(retry_jobs, engine_ctx)
+                successful = [r for r in results if "error" not in r]
+                failed = [r for r in results if "error" in r]
+                if len(successful) > 0:
+                    break
 
         voice_settings = engine_ctx["voice_settings"]
         voice_id_used = (
