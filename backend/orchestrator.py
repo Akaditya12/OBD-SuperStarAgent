@@ -204,7 +204,7 @@ class PipelineOrchestrator:
 
             # ── Step 6: Voice Selection ──
             await self.on_progress("VoiceSelector", "started", {
-                "message": "Selecting optimal ElevenLabs voice and parameters..."
+                "message": "Selecting optimal voice and parameters..."
             })
             voice_selection = await self.voice_selector.run(
                 scripts=final_scripts,
@@ -220,12 +220,12 @@ class PipelineOrchestrator:
                 "user_prompt": self.voice_selector.last_user_prompt,
             })
 
-            # ── Step 7: Audio Production ──
+            # ── Step 7: Hook Audio Previews (3 voices, no BGM) ──
             await self.on_progress("AudioProducer", "started", {
-                "message": "Generating audio recordings..."
+                "message": "Generating hook audio previews (3 voices)..."
             })
             try:
-                audio_result = await self.audio_producer.run(
+                hook_result = await self.audio_producer.run_hook_previews(
                     scripts=final_scripts,
                     voice_selection=voice_selection,
                     session_id=session_id,
@@ -233,17 +233,18 @@ class PipelineOrchestrator:
                     language=language,
                     tts_engine_override=tts_engine,
                 )
-                results["audio"] = audio_result
-                successful = audio_result.get("summary", {}).get("total_generated", 0)
-                engine = audio_result.get("tts_engine", "unknown")
+                results["hook_previews"] = hook_result
+                engine = hook_result.get("tts_engine", "unknown")
+                engine_label = {"murf": "Murf AI", "elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
+                preview_count = hook_result.get("summary", {}).get("total_generated", 0)
                 await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Generated {successful} audio files via {engine}",
-                    "data": {"summary": audio_result.get("summary", {})},
+                    "message": f"Generated {preview_count} hook previews via {engine_label}",
+                    "data": {"summary": hook_result.get("summary", {}), "tts_engine": engine, "tts_engine_label": engine_label},
                 })
             except Exception as audio_err:
-                logger.error(f"Audio production failed: {audio_err}")
+                logger.error(f"Hook preview generation failed: {audio_err}")
                 await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Audio generation failed: {str(audio_err)}. Scripts are still available.",
+                    "message": f"Hook preview generation failed: {str(audio_err)}. Scripts are still available.",
                 })
 
             # ── Pipeline Complete ──
@@ -263,3 +264,44 @@ class PipelineOrchestrator:
             results["error"] = str(e)
 
         return results
+
+    async def run_full_audio(
+        self,
+        scripts: dict[str, Any],
+        voice_selection: dict[str, Any],
+        voice_choices: dict[int, int],
+        session_id: str,
+        country: str = "",
+        language: str | None = None,
+        tts_engine: str | None = None,
+        bgm_style: str = "upbeat",
+    ) -> dict[str, Any]:
+        """Phase 2: generate full audio with user-chosen voices and BGM style."""
+        await self.on_progress("AudioProducer", "started", {
+            "message": f"Generating final audio with {bgm_style} BGM..."
+        })
+        try:
+            audio_result = await self.audio_producer.run_final_audio(
+                scripts=scripts,
+                voice_selection=voice_selection,
+                voice_choices=voice_choices,
+                session_id=session_id,
+                country=country,
+                language=language,
+                tts_engine_override=tts_engine,
+                bgm_style=bgm_style,
+            )
+            engine = audio_result.get("tts_engine", "unknown")
+            engine_label = {"murf": "Murf AI", "elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
+            successful = audio_result.get("summary", {}).get("total_generated", 0)
+            await self.on_progress("AudioProducer", "completed", {
+                "message": f"Generated {successful} final audio files via {engine_label}",
+                "data": {"summary": audio_result.get("summary", {})},
+            })
+            return audio_result
+        except Exception as e:
+            logger.error(f"Final audio generation failed: {e}")
+            await self.on_progress("AudioProducer", "completed", {
+                "message": f"Final audio generation failed: {str(e)}",
+            })
+            return {"error": str(e)}

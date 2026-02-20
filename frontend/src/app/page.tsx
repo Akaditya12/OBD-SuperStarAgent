@@ -38,7 +38,10 @@ import type {
   WsProgressMessage,
   Script,
   AudioFile,
+  HookPreviewResult,
+  AudioResult,
 } from "@/lib/types";
+import { Music, Radio } from "lucide-react";
 
 type WizardStep = "input" | "running" | "results";
 
@@ -112,6 +115,13 @@ export default function HomePage() {
 
   // Audio regeneration
   const [regenVariant, setRegenVariant] = useState<number | null>(null);
+
+  // Hook preview voice selection & full audio generation
+  const [voiceChoices, setVoiceChoices] = useState<Record<number, number>>({});
+  const [bgmStyle, setBgmStyle] = useState<"upbeat" | "calm" | "corporate">("upbeat");
+  const [generatingFullAudio, setGeneratingFullAudio] = useState(false);
+  const [bgmPreviewPlaying, setBgmPreviewPlaying] = useState<string | null>(null);
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // WebSocket ref
   const wsRef = useRef<WebSocket | null>(null);
@@ -433,6 +443,83 @@ export default function HomePage() {
     }
   };
 
+  // ── BGM preview playback ──
+  const toggleBgmPreview = (style: string) => {
+    if (bgmPreviewPlaying === style) {
+      bgmAudioRef.current?.pause();
+      setBgmPreviewPlaying(null);
+      return;
+    }
+    if (bgmAudioRef.current) {
+      bgmAudioRef.current.pause();
+    }
+    const audio = new Audio(`/api/bgm-preview/${style}`);
+    audio.onended = () => setBgmPreviewPlaying(null);
+    audio.play();
+    bgmAudioRef.current = audio;
+    setBgmPreviewPlaying(style);
+  };
+
+  // ── Generate full audio (Phase 2) -- async job with polling ──
+  const generateFullAudio = async () => {
+    if (!result?.session_id) return;
+    setGeneratingFullAudio(true);
+    try {
+      const sid = result.hook_previews?.session_id || result.session_id;
+      const finalScripts = result.final_scripts || result.revised_scripts_round_1 || result.initial_scripts;
+      const startRes = await fetch(
+        `/api/sessions/${sid}/generate-full-audio`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            voice_choices: voiceChoices,
+            bgm_style: bgmStyle,
+            tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
+            scripts: finalScripts,
+            voice_selection: result.voice_selection,
+            country,
+            language: language || undefined,
+          }),
+        }
+      );
+      if (!startRes.ok) {
+        const err = await startRes.json().catch(() => ({ error: "Unknown error" }));
+        toast("error", err.error || "Failed to start audio generation");
+        return;
+      }
+      const { job_id } = await startRes.json();
+
+      // Poll until done
+      const poll = async (): Promise<void> => {
+        for (let i = 0; i < 120; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          try {
+            const pollRes = await fetch(`/api/audio-jobs/${job_id}`);
+            if (!pollRes.ok) continue;
+            const job = await pollRes.json();
+            if (job.status === "done") {
+              const audioResult: AudioResult = job.audio;
+              setResult((prev) => prev ? { ...prev, audio: audioResult } : prev);
+              toast("success", `Generated ${audioResult.summary?.total_generated || 0} final audio files!`);
+              return;
+            }
+            if (job.status === "error") {
+              toast("error", job.error || "Audio generation failed");
+              return;
+            }
+          } catch { /* retry */ }
+        }
+        toast("error", "Audio generation timed out");
+      };
+      await poll();
+    } catch {
+      toast("error", "Network error generating full audio");
+    } finally {
+      setGeneratingFullAudio(false);
+    }
+  };
+
   // ── Reset ──
   const handleReset = () => {
     setWizardStep("input");
@@ -440,6 +527,11 @@ export default function HomePage() {
     setError("");
     setSaved(false);
     setCampaignName("");
+    setVoiceChoices({});
+    setBgmStyle("upbeat");
+    setGeneratingFullAudio(false);
+    setBgmPreviewPlaying(null);
+    if (bgmAudioRef.current) bgmAudioRef.current.pause();
     setProgressSteps(
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
@@ -455,16 +547,24 @@ export default function HomePage() {
     );
   }
 
-  // Extract scripts and audio from result
+  // Extract scripts, hook previews, and audio from result
   const scripts =
     result?.final_scripts?.scripts ||
     result?.revised_scripts_round_1?.scripts ||
     result?.initial_scripts?.scripts ||
     [];
+  const hookPreviews = result?.hook_previews;
+  const hookPreviewFiles = (hookPreviews?.hook_previews || []).filter(
+    (af: AudioFile) => af.file_name && !af.error
+  );
+  const voicePool = hookPreviews?.voice_pool || [];
   const audioFiles = (result?.audio?.audio_files || []).filter(
     (af: AudioFile) => af.file_name && !af.error
   );
   const voiceSelection = result?.voice_selection;
+  const hookSessionId = hookPreviews?.session_id || result?.session_id || "";
+  const resolvedEngine = hookPreviews?.tts_engine || result?.audio?.tts_engine;
+  const resolvedEngineLabel = resolvedEngine === "murf" ? "Murf AI" : resolvedEngine === "edge-tts" ? "Edge TTS" : resolvedEngine === "elevenlabs" ? "ElevenLabs" : null;
 
   const WIZARD_LABELS = ["Configure", "Generate", "Results"];
 
@@ -686,13 +786,22 @@ export default function HomePage() {
             <div className="text-center mb-6">
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--success)]/10 text-[var(--success)] text-sm font-medium border border-[var(--success)]/20 mb-3">
                 <CheckCircle2 className="w-4 h-4" />
-                Campaign Generated Successfully
+                {audioFiles.length > 0 ? "Campaign Generated Successfully" : "Scripts & Hook Previews Ready"}
               </div>
               <p className="text-sm text-[var(--text-tertiary)]">
-                {scripts.length} script{scripts.length !== 1 ? "s" : ""} and{" "}
-                {audioFiles.length} audio file
-                {audioFiles.length !== 1 ? "s" : ""} ready
+                {scripts.length} script{scripts.length !== 1 ? "s" : ""}
+                {hookPreviewFiles.length > 0 && !audioFiles.length && (
+                  <> — listen to hook previews below and pick your voices</>
+                )}
+                {audioFiles.length > 0 && (
+                  <> and {audioFiles.length} audio file{audioFiles.length !== 1 ? "s" : ""} ready</>
+                )}
               </p>
+              {resolvedEngineLabel && (
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                  TTS Engine: <span className="text-[var(--accent)] font-medium">{resolvedEngineLabel}</span>
+                </p>
+              )}
             </div>
           )}
 
@@ -871,7 +980,170 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Audio -- grouped by variant with voice tabs */}
+          {/* ── Hook Previews: voice selection (Phase 1) ── */}
+          {hookPreviewFiles.length > 0 && !audioFiles.length && (() => {
+            const variantIds = [...new Set(hookPreviewFiles.map((af: AudioFile) => af.variant_id))].sort((a, b) => a - b);
+
+            return (
+              <div className="space-y-4">
+                <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-[var(--accent)]" />
+                  Choose Your Voice
+                  <span className="text-[10px] text-[var(--text-tertiary)] ml-1 font-normal">
+                    Listen to hook previews and select a voice for each variant
+                  </span>
+                </h3>
+
+                {variantIds.map((vid) => {
+                  const variantPreviews = hookPreviewFiles.filter((af: AudioFile) => af.variant_id === vid);
+                  const voiceIndices = [...new Set(variantPreviews.map((af: AudioFile) => af.voice_index || 1))].sort();
+                  const selectedVoice = voiceChoices[vid] || 1;
+
+                  return (
+                    <div key={vid} className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] overflow-hidden">
+                      <div className="px-5 py-3 border-b border-[var(--card-border)] bg-[var(--input-bg)]/50">
+                        <span className="text-xs font-medium text-[var(--text-primary)]">
+                          Variant {vid}
+                        </span>
+                        <span className="text-[10px] text-[var(--text-tertiary)] ml-2">
+                          {scripts.find((s: Script) => s.variant_id === vid)?.theme || ""}
+                        </span>
+                      </div>
+                      <div className="p-4 space-y-2">
+                        {voiceIndices.map((voiceIdx) => {
+                          const preview = variantPreviews.find((af: AudioFile) => (af.voice_index || 1) === voiceIdx);
+                          if (!preview) return null;
+                          const audioUrl = `/outputs/${hookSessionId}/${preview.file_name}`;
+                          const isPlaying = playingAudio === audioUrl;
+                          const isSelected = selectedVoice === voiceIdx;
+                          const voiceLabel = preview.voice_label || voicePool.find(v => v.voice_index === voiceIdx)?.voice_label || `Voice ${voiceIdx}`;
+
+                          return (
+                            <label
+                              key={voiceIdx}
+                              className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                                isSelected
+                                  ? "bg-[var(--accent-subtle)] border border-[var(--accent)]/40 ring-1 ring-[var(--accent)]/20"
+                                  : "bg-[var(--input-bg)] border border-transparent hover:bg-[var(--accent-subtle)]/30"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`voice-${vid}`}
+                                checked={isSelected}
+                                onChange={() => setVoiceChoices(prev => ({ ...prev, [vid]: voiceIdx }))}
+                                className="sr-only"
+                              />
+                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                                isSelected ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--card-border)]"
+                              }`}>
+                                {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.preventDefault(); toggleAudio(audioUrl); }}
+                                className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
+                                  isPlaying
+                                    ? "bg-[var(--accent)] text-white"
+                                    : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                }`}
+                              >
+                                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                              </button>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-[var(--text-primary)]">{voiceLabel}</p>
+                                {preview.file_size_bytes && (
+                                  <p className="text-[10px] text-[var(--text-tertiary)]">
+                                    Hook preview — {(preview.file_size_bytes / 1024).toFixed(0)} KB
+                                  </p>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* BGM Style Picker with Preview */}
+                <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-1">
+                    <Music className="w-4 h-4 text-[var(--accent)]" />
+                    Background Music Style
+                  </label>
+                  <p className="text-[10px] text-[var(--text-tertiary)] mb-3">
+                    Click the play button to preview each style before applying
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { id: "upbeat" as const, label: "Upbeat", desc: "Energetic, 110 BPM" },
+                      { id: "calm" as const, label: "Calm", desc: "Soft piano, 80 BPM" },
+                      { id: "corporate" as const, label: "Corporate", desc: "Clean & minimal, 100 BPM" },
+                    ]).map((opt) => {
+                      const isPlaying = bgmPreviewPlaying === opt.id;
+                      return (
+                        <div
+                          key={opt.id}
+                          className={`relative rounded-xl border transition-all ${
+                            bgmStyle === opt.id
+                              ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
+                              : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setBgmStyle(opt.id)}
+                            className="w-full px-3 pt-2.5 pb-8 text-left"
+                          >
+                            <div className={`text-xs font-medium ${bgmStyle === opt.id ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
+                              {opt.label}
+                            </div>
+                            <div className="text-[10px] text-[var(--text-tertiary)]">{opt.desc}</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); toggleBgmPreview(opt.id); }}
+                            className={`absolute bottom-2 left-3 right-3 flex items-center justify-center gap-1.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                              isPlaying
+                                ? "bg-[var(--accent)] text-white"
+                                : "bg-[var(--card)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-[var(--card-border)]"
+                            }`}
+                          >
+                            {isPlaying ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5" />}
+                            {isPlaying ? "Stop" : "Preview"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Generate Full Audio Button */}
+                <button
+                  onClick={generateFullAudio}
+                  disabled={generatingFullAudio}
+                  className="w-full py-3.5 rounded-2xl text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-60 disabled:cursor-not-allowed glow-brand"
+                  style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}
+                >
+                  {generatingFullAudio ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Generating Full Audio...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      Generate Full Audio with Selected Voices
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* ── Final Audio Files (Phase 2 complete) ── */}
           {audioFiles.length > 0 && (() => {
             const audioSessionId = result?.audio?.session_id || result?.session_id || "";
             const variantIds = [...new Set(audioFiles.map((af: AudioFile) => af.variant_id))].sort((a, b) => a - b);
@@ -880,10 +1152,15 @@ export default function HomePage() {
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
                   <Volume2 className="w-4 h-4 text-[var(--accent)]" />
-                  Audio Files
+                  Final Audio Files
                   {result?.audio?.tts_engine && (
                     <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)]">
-                      {result.audio.tts_engine === "murf" ? "Murf AI" : result.audio.tts_engine === "edge-tts" ? "Free TTS" : "ElevenLabs"}
+                      {result.audio.tts_engine === "murf" ? "Murf AI" : result.audio.tts_engine === "edge-tts" ? "Edge TTS" : "ElevenLabs"}
+                    </span>
+                  )}
+                  {result?.audio?.summary?.bgm_style && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--input-bg)] text-[var(--text-tertiary)]">
+                      {result.audio.summary.bgm_style} BGM
                     </span>
                   )}
                 </h3>

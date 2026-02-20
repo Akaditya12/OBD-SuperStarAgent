@@ -111,6 +111,26 @@ export interface AudioResult {
     total_failed: number;
     variants_count: number;
     has_background_music?: boolean;
+    bgm_style?: string;
+  };
+}
+
+export interface VoicePoolEntry {
+  voice_index: number;
+  voice_label: string;
+}
+
+export interface HookPreviewResult {
+  session_id: string;
+  session_dir: string;
+  tts_engine?: "elevenlabs" | "edge-tts" | "murf";
+  voice_pool: VoicePoolEntry[];
+  hook_previews: AudioFile[];
+  failed_previews?: AudioFile[];
+  summary: {
+    total_generated: number;
+    total_failed: number;
+    variants_count: number;
   };
 }
 
@@ -123,6 +143,7 @@ export interface PipelineResult {
   revised_scripts_round_1?: ScriptsResult;
   final_scripts?: ScriptsResult;
   voice_selection?: VoiceSelection;
+  hook_previews?: HookPreviewResult;
   audio?: AudioResult;
   error?: string;
 }

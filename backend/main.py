@@ -632,6 +632,134 @@ async def regenerate_audio(session_id: str, variant_id: int, request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+_audio_jobs: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/sessions/{session_id}/generate-full-audio")
+async def generate_full_audio(session_id: str, request: Request):
+    """Phase 2: kick off full audio generation as a background task.
+
+    Returns a job_id immediately. Frontend polls /api/audio-jobs/{job_id}
+    to check progress and retrieve the result -- avoids proxy timeout.
+    """
+    body = await request.json()
+    voice_choices_raw = body.get("voice_choices", {})
+    voice_choices = {int(k): int(v) for k, v in voice_choices_raw.items()}
+    bgm_style = body.get("bgm_style", "upbeat")
+    tts_engine_choice = body.get("tts_engine")
+
+    result = sessions.get(session_id)
+    if not result:
+        for pid, pstate in pipelines.items():
+            if (pstate.result or {}).get("session_id") == session_id or pid == session_id:
+                if pstate.result:
+                    result = pstate.result
+                    sessions[session_id] = result
+                    break
+
+    final_scripts = None
+    if result:
+        final_scripts = (
+            result.get("final_scripts")
+            or result.get("revised_scripts_round_1")
+            or result.get("initial_scripts")
+        )
+    if not final_scripts:
+        final_scripts = body.get("scripts")
+    if not final_scripts:
+        return JSONResponse(status_code=400, content={"error": "No scripts available. Please generate a new campaign."})
+
+    voice_selection = (result or {}).get("voice_selection") or body.get("voice_selection") or {
+        "selected_voice": {"voice_id": "", "name": "default"},
+        "voice_settings": {},
+    }
+    country_val = body.get("country") or (result or {}).get("country", "")
+    language_val = body.get("language") or (result or {}).get("language") or None
+
+    job_id = uuid.uuid4().hex[:12]
+    _audio_jobs[job_id] = {"status": "running", "session_id": session_id}
+
+    async def _run():
+        from backend.agents import AudioProducerAgent
+        producer = AudioProducerAgent()
+        try:
+            audio_result = await producer.run_final_audio(
+                scripts=final_scripts,
+                voice_selection=voice_selection,
+                voice_choices=voice_choices,
+                session_id=session_id,
+                country=country_val,
+                language=language_val,
+                tts_engine_override=tts_engine_choice or (result or {}).get("tts_engine_choice") or None,
+                bgm_style=bgm_style,
+            )
+            if result:
+                result["audio"] = audio_result
+            else:
+                sessions[session_id] = {"audio": audio_result, "session_id": session_id}
+            logger.info(
+                f"Full audio generated for session {session_id}: "
+                f"{audio_result.get('summary', {}).get('total_generated', 0)} files"
+            )
+            _audio_jobs[job_id] = {
+                "status": "done",
+                "session_id": session_id,
+                "audio": _make_serializable(audio_result),
+            }
+        except Exception as e:
+            logger.error(f"Full audio generation failed for session {session_id}: {e}")
+            _audio_jobs[job_id] = {"status": "error", "session_id": session_id, "error": str(e)}
+
+    asyncio.create_task(_run())
+    return {"status": "accepted", "job_id": job_id}
+
+
+@app.get("/api/audio-jobs/{job_id}")
+async def get_audio_job(job_id: str):
+    """Poll for the status of a background audio generation job."""
+    job = _audio_jobs.get(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    return job
+
+
+# ── BGM Preview ──
+
+_bgm_cache: dict[str, Path] = {}
+
+
+@app.get("/api/bgm-preview/{style}")
+async def bgm_preview(style: str):
+    """Return a short (~8s) BGM-only MP3 sample for the given style."""
+    from backend.agents.audio_producer import BGM_GENERATORS, _mix_voice_with_music
+    import io as _io
+
+    if style not in BGM_GENERATORS:
+        return JSONResponse(status_code=400, content={"error": f"Unknown style: {style}"})
+
+    if style in _bgm_cache and _bgm_cache[style].exists():
+        return FileResponse(str(_bgm_cache[style]), media_type="audio/mpeg")
+
+    gen = BGM_GENERATORS[style]
+    wav_bytes = gen(8000)
+
+    try:
+        from pydub import AudioSegment
+        seg = AudioSegment.from_wav(_io.BytesIO(wav_bytes))
+        seg = seg - 10  # louder for preview (standalone, no voice)
+        change_db = -16.0 - seg.dBFS
+        seg = seg.apply_gain(change_db)
+        preview_dir = OUTPUTS_DIR / "_bgm_previews"
+        preview_dir.mkdir(exist_ok=True)
+        out_path = preview_dir / f"{style}.mp3"
+        seg.export(str(out_path), format="mp3", bitrate="192k")
+        _bgm_cache[style] = out_path
+        return FileResponse(str(out_path), media_type="audio/mpeg")
+    except Exception as e:
+        logger.error(f"BGM preview generation failed: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ── Campaign Endpoints ──
 
 
