@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -25,6 +25,8 @@ const NAV_ITEMS = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
 
+const ADMIN_NAV_ITEM = { href: "/admin", label: "Admin Panel", icon: Shield };
+
 const BNG_PRODUCT_LIST = [
     { id: "eva", label: "EVA", icon: Sparkles },
     { id: "smartconnect", label: "SmartConnect AI", icon: Radio },
@@ -37,6 +39,22 @@ export default function Sidebar() {
     const pathname = usePathname();
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [userRole, setUserRole] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            try {
+                const res = await fetch("/api/auth/me");
+                const data = await res.json();
+                if (data.authenticated) {
+                    setUserRole(data.role);
+                }
+            } catch (err) {
+                console.error("Failed to fetch user role", err);
+            }
+        };
+        fetchUser();
+    }, []);
 
     const navContent = (
         <div className="flex flex-col h-full">
@@ -64,15 +82,15 @@ export default function Sidebar() {
                             href={item.href}
                             onClick={() => setMobileOpen(false)}
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${isActive
-                                    ? "bg-[var(--accent-subtle)] text-[var(--accent)] shadow-sm"
-                                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)]"
+                                ? "bg-[var(--accent-subtle)] text-[var(--accent)] shadow-sm"
+                                : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)]"
                                 }`}
                             style={isActive ? { boxShadow: `0 1px 6px var(--accent-glow)` } : undefined}
                         >
                             <Icon
                                 className={`w-4.5 h-4.5 flex-shrink-0 ${isActive
-                                        ? "text-[var(--accent)]"
-                                        : "text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]"
+                                    ? "text-[var(--accent)]"
+                                    : "text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]"
                                     }`}
                             />
                             {!collapsed && (
@@ -84,6 +102,28 @@ export default function Sidebar() {
                         </Link>
                     );
                 })}
+
+                {/* Admin Item */}
+                {userRole === "admin" && (
+                    <Link
+                        href={ADMIN_NAV_ITEM.href}
+                        onClick={() => setMobileOpen(false)}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group mt-4 border border-[var(--warning)]/20 ${pathname.startsWith(ADMIN_NAV_ITEM.href)
+                            ? "bg-[var(--warning)]/10 text-[var(--warning)] shadow-sm"
+                            : "text-[var(--warning)]/70 hover:text-[var(--warning)] hover:bg-[var(--warning)]/10"
+                            }`}
+                    >
+                        <ADMIN_NAV_ITEM.icon
+                            className={`w-4.5 h-4.5 flex-shrink-0 ${pathname.startsWith(ADMIN_NAV_ITEM.href)
+                                ? "text-[var(--warning)]"
+                                : "text-[var(--warning)]/70 group-hover:text-[var(--warning)]"
+                                }`}
+                        />
+                        {!collapsed && (
+                            <span className="animate-fade-in">{ADMIN_NAV_ITEM.label}</span>
+                        )}
+                    </Link>
+                )}
             </nav>
 
             {/* BNG Products */}
@@ -102,17 +142,15 @@ export default function Sidebar() {
                                 key={product.id}
                                 href={`/product/${product.id}`}
                                 onClick={() => setMobileOpen(false)}
-                                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-200 group ${
-                                    isProductActive
+                                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-200 group ${isProductActive
                                         ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
                                         : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)]"
-                                }`}
+                                    }`}
                             >
-                                <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${
-                                    isProductActive
+                                <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isProductActive
                                         ? "text-[var(--accent)]"
                                         : "text-[var(--text-tertiary)] group-hover:text-[var(--accent)]"
-                                }`} />
+                                    }`} />
                                 {!collapsed && (
                                     <span className="animate-fade-in truncate">{product.label}</span>
                                 )}

@@ -34,3 +34,8 @@ MAX_SCRIPT_WORDS = 75  # ~30 seconds at normal speaking pace
 EVAL_FEEDBACK_ROUNDS = 1  # Number of revision cycles between Writer and Eval Panel
 NUM_SCRIPT_VARIANTS = 5  # Number of script sets to generate
 NUM_FALLBACKS_PER_SCRIPT = 2  # Fallback CTA variants per script
+
+# --- Supabase Configuration ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")

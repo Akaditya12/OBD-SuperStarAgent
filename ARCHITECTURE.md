@@ -94,9 +94,9 @@ The output is a set of downloadable MP3 files ready for telecom OBD systems.
 | **TTS (Fallback 1)** | ElevenLabs (Multilingual v2) | Alternative premium TTS |
 | **TTS (Fallback 2)** | edge-tts (Microsoft) | Free, unlimited TTS |
 | **Audio Processing** | pydub + ffmpeg | BGM mixing, format conversion |
-| **Database** | SQLite | Campaign persistence |
-| **Auth** | JWT (PyJWT) | Optional team authentication |
-| **Deployment** | Docker, Render.com | Combined frontend+backend container |
+| **Database** | Supabase (Postgres) | Cloud-scale campaign persistence |
+| **Auth** | Supabase Auth (JWT) | Multi-user & Admin authentication |
+| **Deployment** | Docker, Vercel / Render.com | Cloud deployment configuration |
 
 ---
 
@@ -430,21 +430,24 @@ Script text
 | Collaboration rooms | `_rooms` dict in `collaboration.py` | Until server restart |
 | Activity feed | `_activity_feed` list in `collaboration.py` | Until server restart |
 
-### SQLite (Persists Locally)
+### Supabase Cloud (Production)
 
 | Table | Fields | Purpose |
 |-------|--------|---------|
-| `campaigns` | id, name, created_by, created_at, country, telco, language, result_json, script_count, has_audio | Saved campaigns with full pipeline results |
+| `users` | id, username, email, password_hash, role, team | User management and auth |
+| `campaigns` | id, name, created_by, created_at, country, telco, language, result_json, script_count, has_audio | Saved campaigns with full results |
 | `campaign_comments` | id, campaign_id, username, text, created_at | Comments on campaigns |
+| `audit_log` | id, admin_username, action, details, created_at | Security logging |
 
-**Location:** `backend/campaigns.db`
-**On Render:** Ephemeral (lost on redeploy)
+**Location:** [Supabase Dashboard](https://supabase.com)
+**Rollback:** See [ROLLBACK.md](./ROLLBACK.md)
 
-### File System
+### File System (Storage)
 
 | Path | Content | Lifetime |
 |------|---------|----------|
-| `backend/outputs/{session_id}/` | Generated MP3 audio files | Until deleted or redeploy |
+| `audio-files` (Supabase) | Generated MP3 audio files | Permanent cloud storage |
+| `backend/outputs/` | Local cache / fallback audio | Shared across team |
 
 ---
 

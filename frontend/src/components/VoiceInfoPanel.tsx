@@ -126,17 +126,36 @@ function VoicePreviewButton({ url, label }: { url?: string; label?: string }) {
   return (
     <button
       onClick={toggle}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
-        playing
-          ? "bg-[var(--accent)] text-white"
-          : "bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)]/20"
-      }`}
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${playing
+        ? "bg-[var(--accent)] text-white"
+        : "bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)]/20"
+        }`}
       title={playing ? "Stop preview" : "Play voice preview"}
     >
       {playing ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
       {label || (playing ? "Stop" : "Preview")}
     </button>
   );
+}
+
+interface VoiceProfile {
+  voice_id: string;
+  name: string;
+  description: string;
+  language?: string;
+  gender?: string;
+  age?: string;
+  accent?: string;
+  preview_url?: string;
+  rationale: string;
+  settings: {
+    stability: number;
+    similarity_boost: number;
+    style: number;
+    speed: number;
+  };
+  production_notes?: string;
+  is_primary: boolean;
 }
 
 export default function VoiceInfoPanel({
@@ -146,36 +165,82 @@ export default function VoiceInfoPanel({
 }: VoiceInfoPanelProps) {
   const [showApiParams, setShowApiParams] = useState(false);
   const [showAlternatives, setShowAlternatives] = useState(false);
-
-  const selected_voice = voiceSelection?.selected_voice || {
-    voice_id: "", name: "Unknown", description: "", language: "", gender: "", age: "", accent: "",
-  };
-  const voice_settings = voiceSelection?.voice_settings || {
-    stability: 0, similarity_boost: 0, style: 0, speed: 1,
-  };
-  const elevenlabs_api_params = voiceSelection?.elevenlabs_api_params;
-  const rationale = voiceSelection?.rationale || "";
-  const alternative_voices = voiceSelection?.alternative_voices;
-  const audio_production_notes = voiceSelection?.audio_production_notes;
+  const [activeVoiceIdx, setActiveVoiceIdx] = useState(0);
 
   const isEdgeTts = ttsEngine === "edge-tts";
   const isMurf = ttsEngine === "murf";
 
+  // If we have alternative voices, we treat them as part of the "pool"
+  const voices: VoiceProfile[] = [];
+  if (voiceSelection?.selected_voice) {
+    voices.push({
+      ...voiceSelection.selected_voice,
+      rationale: voiceSelection.rationale,
+      settings: voiceSelection.voice_settings,
+      production_notes: voiceSelection.audio_production_notes,
+      is_primary: true
+    });
+  }
+
+  if (voiceSelection?.alternative_voices) {
+    voiceSelection.alternative_voices.forEach(alt => {
+      voices.push({
+        voice_id: alt.voice_id,
+        name: alt.name,
+        description: alt.reason,
+        rationale: alt.reason,
+        preview_url: alt.preview_url,
+        settings: voiceSelection.voice_settings, // assume same settings for now
+        is_primary: false,
+        language: "", gender: "", age: "", accent: "" // Fallbacks for alternatives
+      });
+    });
+  }
+
+  // Ensure we have at least something to show
+  const displayVoices: VoiceProfile[] = voices.length > 0 ? voices.slice(0, 3) : [{
+    voice_id: "", name: "Unknown", description: "", language: "", gender: "", age: "", accent: "",
+    rationale: "", settings: { stability: 0, similarity_boost: 0, style: 0, speed: 1 }, is_primary: true
+  }];
+
+  const currentVoice = displayVoices[activeVoiceIdx] || displayVoices[0];
+  const voice_settings = currentVoice.settings;
+  const elevenlabs_api_params = voiceSelection?.elevenlabs_api_params;
+  const alternative_voices = voiceSelection?.alternative_voices;
+
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
-        <BarChart3 className="w-4 h-4 text-[var(--accent)]" />
-        Voice Analytics
-        {ttsEngine && (
-          <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full ${
-            isEdgeTts
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-[var(--accent)]" />
+          Voice Analytics
+          {ttsEngine && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full ${isEdgeTts
               ? "bg-green-500/10 text-green-600 border border-green-500/20"
               : "bg-purple-500/10 text-purple-600 border border-purple-500/20"
-          }`}>
-            {isMurf ? "Murf AI (Gen2)" : isEdgeTts ? "edge-tts (Free)" : "ElevenLabs"}
-          </span>
+              }`}>
+              {isMurf ? "Murf AI (Gen2)" : isEdgeTts ? "edge-tts (Free)" : "ElevenLabs"}
+            </span>
+          )}
+        </h3>
+
+        {displayVoices.length > 1 && (
+          <div className="flex items-center gap-1 bg-[var(--input-bg)] p-0.5 rounded-lg border border-[var(--card-border)]">
+            {displayVoices.map((v, i) => (
+              <button
+                key={v.voice_id || i}
+                onClick={() => setActiveVoiceIdx(i)}
+                className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all ${activeVoiceIdx === i
+                  ? "bg-[var(--accent)] text-white shadow-sm"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  }`}
+              >
+                {v.name}
+              </button>
+            ))}
+          </div>
         )}
-      </h3>
+      </div>
 
       {/* AI Voice Analysis Card */}
       <div className="rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent-subtle)] p-4 space-y-3">
@@ -186,32 +251,32 @@ export default function VoiceInfoPanel({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-base font-semibold text-[var(--text-primary)]">
-                {selected_voice.name}
+                {currentVoice.name}
               </span>
-              {selected_voice.gender && (
+              {currentVoice.gender && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20">
-                  {selected_voice.gender}
+                  {currentVoice.gender}
                 </span>
               )}
-              {selected_voice.age && (
+              {currentVoice.age && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-500/10 text-purple-600 border border-purple-500/20">
-                  {selected_voice.age}
+                  {currentVoice.age}
                 </span>
               )}
-              <VoicePreviewButton url={selected_voice.preview_url} label="Listen" />
+              <VoicePreviewButton url={currentVoice.preview_url} label="Listen" />
             </div>
-            {selected_voice.description && (
+            {currentVoice.description && (
               <p className="text-xs text-[var(--text-secondary)] mt-1">
-                {selected_voice.description}
+                {currentVoice.description}
               </p>
             )}
             <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-tertiary)]">
               <span className="flex items-center gap-1">
                 <Globe className="w-3 h-3" />
-                {selected_voice.language || selected_voice.accent || "Multilingual"}
+                {currentVoice.language || currentVoice.accent || "Multilingual"}
               </span>
-              {selected_voice.accent && selected_voice.language && (
-                <span>{selected_voice.accent} accent</span>
+              {currentVoice.accent && currentVoice.language && (
+                <span>{currentVoice.accent} accent</span>
               )}
             </div>
           </div>
@@ -246,14 +311,14 @@ export default function VoiceInfoPanel({
         )}
 
         {/* Why This Voice - Rationale */}
-        {rationale && (
+        {currentVoice.rationale && (
           <div className="p-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)]">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--warning)] flex items-center gap-1">
               <Lightbulb className="w-3 h-3" />
-              Why This Voice Was Chosen
+              {currentVoice.is_primary ? "Why This Voice Was Chosen" : "Voice Characteristics"}
             </span>
             <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
-              {rationale}
+              {currentVoice.rationale}
             </p>
           </div>
         )}
@@ -290,8 +355,8 @@ export default function VoiceInfoPanel({
             color="bg-emerald-500"
             description={
               voice_settings.speed > 1.05 ? "Faster than normal" :
-              voice_settings.speed < 0.95 ? "Slower, more deliberate" :
-              "Normal speaking pace"
+                voice_settings.speed < 0.95 ? "Slower, more deliberate" :
+                  "Normal speaking pace"
             }
           />
         </div>
@@ -308,13 +373,13 @@ export default function VoiceInfoPanel({
       </div>
 
       {/* Production Notes */}
-      {audio_production_notes && (
+      {currentVoice.production_notes && (
         <div className="p-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
             Production Notes
           </span>
           <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
-            {audio_production_notes}
+            {currentVoice.production_notes}
           </p>
         </div>
       )}

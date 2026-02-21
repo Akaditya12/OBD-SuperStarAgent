@@ -12,12 +12,14 @@ export default function ThemePicker({ collapsed }: { collapsed?: boolean }) {
 
   if (collapsed) {
     return (
-      <button
-        onClick={() => setOpen(!open)}
-        className="relative flex items-center justify-center w-full py-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)] transition-colors"
-        title="Change theme"
-      >
-        <Palette className="w-4 h-4" />
+      <div className="relative flex justify-center w-full">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center justify-center w-full py-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)] transition-colors"
+          title="Change theme"
+        >
+          <Palette className="w-4 h-4" />
+        </button>
         {open && (
           <div className="absolute left-full ml-2 bottom-0 z-50 p-2 rounded-xl bg-[var(--card)] border border-[var(--card-border)] shadow-2xl animate-scale-in min-w-[180px]">
             <p className="text-[10px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider px-2 mb-2">
@@ -42,7 +44,7 @@ export default function ThemePicker({ collapsed }: { collapsed?: boolean }) {
             </div>
           </div>
         )}
-      </button>
+      </div>
     );
   }
 
@@ -113,11 +115,10 @@ function ThemeOption({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-left transition-all ${
-        isActive
+      className={`flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-left transition-all ${isActive
           ? "bg-[var(--accent-subtle)] text-[var(--text-primary)]"
           : "text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text-primary)]"
-      }`}
+        }`}
     >
       {/* Mini preview swatch */}
       <div

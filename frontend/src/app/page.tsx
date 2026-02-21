@@ -712,11 +712,10 @@ export default function HomePage() {
                     key={opt.id}
                     type="button"
                     onClick={() => setTtsEngine(opt.id)}
-                    className={`px-3 py-2.5 rounded-xl text-left border transition-all ${
-                      ttsEngine === opt.id
+                    className={`px-3 py-2.5 rounded-xl text-left border transition-all ${ttsEngine === opt.id
                         ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
                         : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
-                    }`}
+                      }`}
                   >
                     <div className={`text-xs font-medium ${ttsEngine === opt.id ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
                       {opt.label}
@@ -854,11 +853,10 @@ export default function HomePage() {
                 return (
                   <div
                     key={idx}
-                    className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-colors ${
-                      isEdited
+                    className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-colors ${isEdited
                         ? "border-amber-500/40 bg-amber-500/5"
                         : "border-[var(--card-border)] hover:border-[var(--card-border-hover)]"
-                    }`}
+                      }`}
                   >
                     <button
                       className="w-full flex items-center justify-between px-5 py-4 text-left"
@@ -1013,7 +1011,7 @@ export default function HomePage() {
                         {voiceIndices.map((voiceIdx) => {
                           const preview = variantPreviews.find((af: AudioFile) => (af.voice_index || 1) === voiceIdx);
                           if (!preview) return null;
-                          const audioUrl = `/outputs/${hookSessionId}/${preview.file_name}`;
+                          const audioUrl = `/api/audio/${hookSessionId}/${preview.file_name}`;
                           const isPlaying = playingAudio === audioUrl;
                           const isSelected = selectedVoice === voiceIdx;
                           const voiceLabel = preview.voice_label || voicePool.find(v => v.voice_index === voiceIdx)?.voice_label || `Voice ${voiceIdx}`;
@@ -1021,11 +1019,10 @@ export default function HomePage() {
                           return (
                             <label
                               key={voiceIdx}
-                              className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
-                                isSelected
+                              className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${isSelected
                                   ? "bg-[var(--accent-subtle)] border border-[var(--accent)]/40 ring-1 ring-[var(--accent)]/20"
                                   : "bg-[var(--input-bg)] border border-transparent hover:bg-[var(--accent-subtle)]/30"
-                              }`}
+                                }`}
                             >
                               <input
                                 type="radio"
@@ -1034,19 +1031,17 @@ export default function HomePage() {
                                 onChange={() => setVoiceChoices(prev => ({ ...prev, [vid]: voiceIdx }))}
                                 className="sr-only"
                               />
-                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                                isSelected ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--card-border)]"
-                              }`}>
+                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isSelected ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--card-border)]"
+                                }`}>
                                 {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
                               </div>
                               <button
                                 type="button"
                                 onClick={(e) => { e.preventDefault(); toggleAudio(audioUrl); }}
-                                className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
-                                  isPlaying
+                                className={`p-2 rounded-lg transition-colors flex-shrink-0 ${isPlaying
                                     ? "bg-[var(--accent)] text-white"
                                     : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                                }`}
+                                  }`}
                               >
                                 {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                               </button>
@@ -1085,11 +1080,10 @@ export default function HomePage() {
                       return (
                         <div
                           key={opt.id}
-                          className={`relative rounded-xl border transition-all ${
-                            bgmStyle === opt.id
+                          className={`relative rounded-xl border transition-all ${bgmStyle === opt.id
                               ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
                               : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
-                          }`}
+                            }`}
                         >
                           <button
                             type="button"
@@ -1104,11 +1098,10 @@ export default function HomePage() {
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); toggleBgmPreview(opt.id); }}
-                            className={`absolute bottom-2 left-3 right-3 flex items-center justify-center gap-1.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
-                              isPlaying
+                            className={`absolute bottom-2 left-3 right-3 flex items-center justify-center gap-1.5 py-1 rounded-lg text-[10px] font-medium transition-all ${isPlaying
                                 ? "bg-[var(--accent)] text-white"
                                 : "bg-[var(--card)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-[var(--card-border)]"
-                            }`}
+                              }`}
                           >
                             {isPlaying ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5" />}
                             {isPlaying ? "Stop" : "Preview"}
@@ -1193,7 +1186,7 @@ export default function HomePage() {
                               )}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {voiceFiles.map((af: AudioFile, i: number) => {
-                                  const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
+                                  const audioUrl = `/api/audio/${audioSessionId}/${af.file_name}`;
                                   const isPlaying = playingAudio === audioUrl;
                                   return (
                                     <div
@@ -1202,11 +1195,10 @@ export default function HomePage() {
                                     >
                                       <button
                                         onClick={() => toggleAudio(audioUrl)}
-                                        className={`p-2 rounded-lg transition-colors ${
-                                          isPlaying
+                                        className={`p-2 rounded-lg transition-colors ${isPlaying
                                             ? "bg-[var(--accent)] text-white"
                                             : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                                        }`}
+                                          }`}
                                       >
                                         {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                                       </button>

@@ -22,8 +22,7 @@ from backend.auth import (
     create_token,
     get_token_from_websocket,
     verify_token,
-    LOGIN_USERNAME,
-    LOGIN_PASSWORD,
+    authenticate_user,
 )
 from backend.config import OUTPUTS_DIR
 from backend.database import (
@@ -64,9 +63,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS -- use ALLOWED_ORIGINS env var in production, default to * for local dev
+# CORS -- allow local dev and production frontend
 import os
-_allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000").split(",")
+# Strip whitespace from origins
+_allowed_origins = [origin.strip() for origin in _allowed_origins if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,7 +77,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Auth middleware -- only active when LOGIN_USERNAME + LOGIN_PASSWORD are set
+# Auth middleware -- active when Supabase is configured or LOGIN_USERNAME/PASSWORD env vars are set
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
 # Serve generated audio files
@@ -206,9 +207,6 @@ async def health_check():
     return {"status": "ok", "service": "OBD SuperStar Agent"}
 
 
-# ── Auth Endpoints ──
-
-
 @app.post("/api/auth/login")
 async def login(request: Request):
     """Authenticate with username/password and receive a JWT cookie."""
@@ -219,12 +217,15 @@ async def login(request: Request):
     username = body.get("username", "")
     password = body.get("password", "")
 
-    if username == LOGIN_USERNAME and password == LOGIN_PASSWORD:
-        token = create_token(username)
+    user = authenticate_user(username, password)
+    if user:
+        token = create_token(user)
         response = JSONResponse(content={
             "message": "Login successful",
             "authenticated": True,
             "username": username,
+            "role": user.get("role"),
+            "team": user.get("team"),
         })
         response.set_cookie(
             key="obd_token",
@@ -246,14 +247,20 @@ async def login(request: Request):
 async def auth_me(request: Request):
     """Check if the current user is authenticated."""
     if not auth_enabled():
-        return {"authenticated": True, "auth_enabled": False, "username": "local"}
+        return {"authenticated": True, "auth_enabled": False, "username": "local", "role": "admin"}
 
     from backend.auth import get_token_from_request
     token = get_token_from_request(request)
     if token:
-        username = verify_token(token)
-        if username:
-            return {"authenticated": True, "auth_enabled": True, "username": username}
+        payload = verify_token(token)
+        if payload:
+            return {
+                "authenticated": True, 
+                "auth_enabled": True, 
+                "username": payload.get("sub"),
+                "role": payload.get("role"),
+                "team": payload.get("team"),
+            }
 
     return JSONResponse(
         status_code=401,
@@ -267,6 +274,147 @@ async def logout():
     response = JSONResponse(content={"message": "Logged out"})
     response.delete_cookie("obd_token")
     return response
+
+
+# ── Admin Endpoints ──
+
+@app.get("/api/admin/users")
+async def list_users():
+    """List all users (Admin only)."""
+    from backend.database import supabase
+    if not supabase:
+        return JSONResponse(status_code=500, content={"error": "Supabase not configured"})
+        
+    try:
+        # Don't return password hashes to the frontend
+        res = supabase.table("users").select("id, username, email, role, team, is_active, created_at").order("created_at").execute()
+        return {"users": res.data}
+    except Exception as e:
+        logger.error(f"Failed to list users: {e}")
+        return JSONResponse(status_code=500, content={"error": "Database error"})
+
+@app.post("/api/admin/users")
+async def create_user(request: Request):
+    """Create a new user (Admin only)."""
+    from backend.database import supabase
+    import bcrypt
+    
+    if not supabase:
+        return {"error": "Supabase not configured"}
+        
+    body = await request.json()
+    username = body.get("username", "").strip()
+    email = body.get("email", "").strip()
+    password = body.get("password", "")
+    role = body.get("role", "member")
+    team = body.get("team", "default").strip()
+    
+    if not username or not email or not password:
+        return JSONResponse(status_code=400, content={"error": "Missing required fields"})
+        
+    salt = bcrypt.gensalt()
+    password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+    
+    try:
+        user_data = {
+            "username": username,
+            "email": email,
+            "password_hash": password_hash,
+            "role": role,
+            "team": team,
+            "is_active": True
+        }
+        res = supabase.table("users").insert(user_data).execute()
+        
+        # Log action
+        admin_username = getattr(request.state, "username", "unknown")
+        supabase.table("audit_log").insert({
+            "admin_username": admin_username,
+            "action": "create_user",
+            "target_user": username,
+            "details": {"role": role, "team": team}
+        }).execute()
+        
+        # Don't return password hash
+        new_user = res.data[0].copy()
+        new_user.pop("password_hash", None)
+        return {"user": new_user}
+    except Exception as e:
+        logger.error(f"Failed to create user: {e}")
+        return JSONResponse(status_code=500, content={"error": "Failed to create user. Username or email might already exist."})
+
+@app.put("/api/admin/users/{user_id}")
+async def update_user(user_id: str, request: Request):
+    """Update a user (Admin only)."""
+    from backend.database import supabase
+    import bcrypt
+    
+    if not supabase:
+        return {"error": "Supabase not configured"}
+        
+    body = await request.json()
+    updates = {}
+    
+    if "role" in body: updates["role"] = body["role"]
+    if "team" in body: updates["team"] = body["team"].strip()
+    if "is_active" in body: updates["is_active"] = body["is_active"]
+    if "password" in body and body["password"]:
+        salt = bcrypt.gensalt()
+        updates["password_hash"] = bcrypt.hashpw(body["password"].encode('utf-8'), salt).decode('utf-8')
+        
+    if not updates:
+        return {"message": "No updates provided"}
+        
+    try:
+        res = supabase.table("users").update(updates).eq("id", user_id).execute()
+        
+        # Log action
+        admin_username = getattr(request.state, "username", "unknown")
+        target_username = res.data[0].get("username") if res.data else user_id
+        
+        log_details = updates.copy()
+        log_details.pop("password_hash", None)
+        
+        supabase.table("audit_log").insert({
+            "admin_username": admin_username,
+            "action": "update_user",
+            "target_user": target_username,
+            "details": log_details
+        }).execute()
+        
+        updated_user = res.data[0].copy() if res.data else {}
+        updated_user.pop("password_hash", None)
+        return {"user": updated_user}
+    except Exception as e:
+        logger.error(f"Failed to update user: {e}")
+        return JSONResponse(status_code=500, content={"error": "Database error"})
+
+@app.delete("/api/admin/users/{user_id}")
+async def deactivate_user(user_id: str, request: Request):
+    """Deactivate a user (Admin only, soft delete)."""
+    from backend.database import supabase
+    if not supabase:
+        return {"error": "Supabase not configured"}
+        
+    try:
+        res = supabase.table("users").update({"is_active": False}).eq("id", user_id).execute()
+        
+        # Log action
+        admin_username = getattr(request.state, "username", "unknown")
+        target_username = res.data[0].get("username") if res.data else user_id
+        
+        supabase.table("audit_log").insert({
+            "admin_username": admin_username,
+            "action": "deactivate_user",
+            "target_user": target_username,
+            "details": {}
+        }).execute()
+        
+        return {"message": "User deactivated"}
+    except Exception as e:
+        logger.error(f"Failed to deactivate user: {e}")
+        return JSONResponse(status_code=500, content={"error": "Database error"})
+
 
 
 # ── File Upload / Text Extraction ──
@@ -451,6 +599,22 @@ async def get_session(session_id: str):
 @app.get("/api/sessions/{session_id}/audio")
 async def list_audio_files(session_id: str):
     """List all generated audio files for a session."""
+    # First check if the session exists in memory to get public_urls
+    if session_id in sessions and "audio" in sessions[session_id]:
+        audio_files = sessions[session_id]["audio"].get("audio_files", [])
+        if audio_files:
+            files = []
+            for file_info in audio_files:
+                if "error" not in file_info:
+                    files.append({
+                        "name": file_info.get("file_name"),
+                        "size_bytes": file_info.get("file_size_bytes"),
+                        "url": file_info.get("public_url") or f"/outputs/{session_id}/{file_info.get('file_name')}",
+                    })
+            if files:
+                return {"session_id": session_id, "files": files}
+                
+    # Fallback to local files if not in memory or no audio data
     session_dir = OUTPUTS_DIR / session_id
     if not session_dir.exists():
         return JSONResponse(status_code=404, content={"error": "Session not found"})
@@ -468,6 +632,30 @@ async def list_audio_files(session_id: str):
 @app.get("/api/audio/{session_id}/{filename}")
 async def download_audio(session_id: str, filename: str):
     """Download a specific audio file."""
+    # Support for direct download via proxy
+    download = True  # Default to download for this endpoint
+
+    # Check if we should serve from Supabase
+    if session_id in sessions and "audio" in sessions[session_id]:
+        audio_files = sessions[session_id]["audio"].get("audio_files", [])
+        for file_info in audio_files:
+            if file_info.get("file_name") == filename and file_info.get("public_url"):
+                import httpx
+                from fastapi.responses import StreamingResponse
+                
+                async def stream_remote():
+                    async with httpx.AsyncClient() as client:
+                        async with client.stream("GET", file_info["public_url"]) as resp:
+                            async for chunk in resp.aiter_bytes():
+                                yield chunk
+
+                return StreamingResponse(
+                    stream_remote(),
+                    media_type="audio/mpeg",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                )
+
+    # Fallback to local file
     file_path = OUTPUTS_DIR / session_id / filename
     if not file_path.exists():
         return JSONResponse(status_code=404, content={"error": "File not found"})
@@ -479,17 +667,32 @@ async def download_audio(session_id: str, filename: str):
 
 
 @app.get("/api/sessions/{session_id}/scripts")
-async def download_scripts(session_id: str, fmt: str = "json"):
-    """Download scripts for a session as JSON or plain text."""
+async def download_scripts(session_id: str, fmt: str = "json", variant_id: Optional[int] = None):
+    """Download scripts for a session as JSON or plain text. Optionally filter by variant_id."""
     if session_id not in sessions:
-        return JSONResponse(status_code=404, content={"error": "Session not found"})
+        # Fallback to DB if not in memory
+        from backend.database import get_campaign
+        campaign = get_campaign(session_id)
+        if not campaign or not campaign.get("result"):
+             return JSONResponse(status_code=404, content={"error": "Session not found"})
+        result = campaign["result"]
+    else:
+        result = sessions[session_id]
 
-    result = sessions[session_id]
     final_scripts = result.get("final_scripts", result.get("revised_scripts_round_1", result.get("initial_scripts", {})))
     scripts = final_scripts.get("scripts", [])
 
+    if variant_id is not None:
+        scripts = [s for s in scripts if s.get("variant_id") == variant_id]
+        if not scripts:
+            # Fallback to index if variant_id wasn't explicitly set
+            if 0 <= variant_id - 1 < len(final_scripts.get("scripts", [])):
+                scripts = [final_scripts["scripts"][variant_id - 1]]
+
     if not scripts:
         return JSONResponse(status_code=404, content={"error": "No scripts found in session"})
+
+    filename_suffix = f"_v{variant_id}" if variant_id is not None else ""
 
     if fmt == "text":
         # Plain text format for easy reading / copy-paste
@@ -508,16 +711,19 @@ async def download_scripts(session_id: str, fmt: str = "json"):
             lines.append(f"\n--- POLITE CLOSURE ---\n{s.get('polite_closure', '')}")
             lines.append("")
         text_content = "\n".join(lines)
-        return JSONResponse(
-            content={"filename": f"scripts_{session_id}.txt", "content": text_content},
+    from fastapi import Response
+    if fmt == "text":
+        return Response(
+            content=text_content,
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=scripts_{session_id}{filename_suffix}.txt"},
         )
 
     # Default: JSON
-    return JSONResponse(
-        content={
-            "filename": f"scripts_{session_id}.json",
-            "content": json.dumps(final_scripts, indent=2),
-        },
+    return Response(
+        content=json.dumps(final_scripts if variant_id is None else {"scripts": scripts}, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=scripts_{session_id}{filename_suffix}.json"},
     )
 
 
@@ -784,10 +990,10 @@ async def create_campaign(request: Request):
 
     result = sessions[session_id]
 
-    # Get username from auth
     username = getattr(request.state, "username", "local")
+    user_payload = getattr(request.state, "user", {})
+    team = user_payload.get("team", "default") if isinstance(user_payload, dict) else "default"
 
-    # Extract country/telco/language from the result or session
     country = result.get("country", "")
     telco = result.get("telco", "")
     language = result.get("language", "")
@@ -800,6 +1006,7 @@ async def create_campaign(request: Request):
         telco=telco,
         language=language,
         result=result,
+        team=team,
     )
 
     return campaign
@@ -913,7 +1120,9 @@ async def websocket_collaborate(ws: WebSocket, campaign_id: str):
     if auth_enabled():
         token = get_token_from_websocket(ws)
         if token:
-            username = verify_token(token) or "user"
+            payload = verify_token(token)
+            if payload:
+                username = payload.get("sub") or "user"
 
     user = register_user(ws_id, username, ws)
     update_user_activity(ws_id, campaign_id)

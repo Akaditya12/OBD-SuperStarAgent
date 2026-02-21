@@ -15,6 +15,7 @@ import asyncio
 import io
 import logging
 import math
+import os
 import re
 import struct
 import uuid
@@ -33,6 +34,7 @@ from backend.config import (
     MURF_API_KEY,
     OUTPUTS_DIR,
 )
+from backend.database import supabase
 
 from .base import BaseAgent
 
@@ -1036,6 +1038,31 @@ class AudioProducerAgent(BaseAgent):
                 result["theme"] = job.get("theme", "")
                 result["voice_index"] = job.get("voice_index", 1)
                 result["voice_label"] = job.get("voice_label", "Voice 1")
+                
+                # UPLOAD TO SUPABASE If Available
+                if supabase:
+                    try:
+                        file_path = Path(result["file_path"])
+                        bucket_name = "audio-files"
+                        # Create unique path in bucket like session_id/filename
+                        session_id = str(job["path"].parent.name)
+                        storage_path = f"{session_id}/{file_path.name}"
+                        
+                        # Upload file
+                        with open(file_path, "rb") as f:
+                            supabase.storage.from_(bucket_name).upload(
+                                path=storage_path,
+                                file=f,
+                                file_options={"content-type": "audio/mpeg"}
+                            )
+                        
+                        # Get public url
+                        public_url = supabase.storage.from_(bucket_name).get_public_url(storage_path)
+                        result["public_url"] = public_url
+                        logger.info(f"[{self.name}] Uploaded {file_path.name} to Supabase: {public_url}")
+                    except Exception as upload_err:
+                        logger.error(f"[{self.name}] Supabase upload failed for {job['path'].name}: {upload_err}")
+                        
                 return result
             except Exception as e:
                 logger.error(f"[{self.name}] Failed {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}: {e}")

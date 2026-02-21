@@ -1,4 +1,4 @@
-"""SQLite-based campaign persistence for OBD SuperStar Agent."""
+"""Database persistence for OBD SuperStar Agent (Supabase + SQLite fallback)."""
 
 from __future__ import annotations
 
@@ -9,27 +9,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.config import SUPABASE_URL, SUPABASE_SERVICE_KEY
+
 logger = logging.getLogger(__name__)
 
+# --- Supabase Setup ---
+supabase: Optional[Any] = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    try:
+        from supabase import Client, create_client
+        supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        logger.info("Supabase client initialized successfully.")
+    except ImportError:
+        logger.warning("supabase package not installed; falling back to SQLite.")
+        supabase = None
+    except Exception as e:
+        logger.error("Failed to initialize Supabase client: %s", e)
+        supabase = None
+
+# --- SQLite Fallback Setup ---
 DB_PATH = Path(__file__).parent / "campaigns.db"
 
-
-def _get_conn() -> sqlite3.Connection:
+def _get_sqlite_conn() -> sqlite3.Connection:
     """Get a SQLite connection with row factory."""
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def init_db() -> None:
-    """Create the campaigns and comments tables if they don't exist."""
-    conn = _get_conn()
+    """Initialize database tables (SQLite fallback only)."""
+    if supabase:
+        logger.info("Using Supabase. Skipping local SQLite init.")
+        return
+
+    conn = _get_sqlite_conn()
     try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS campaigns (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 created_by TEXT NOT NULL DEFAULT 'local',
+                team TEXT NOT NULL DEFAULT 'default',
                 created_at TEXT NOT NULL,
                 country TEXT NOT NULL DEFAULT '',
                 telco TEXT NOT NULL DEFAULT '',
@@ -50,10 +70,11 @@ def init_db() -> None:
             )
         """)
         conn.commit()
-        logger.info("Campaign database initialized at %s", DB_PATH)
+        logger.info("Local SQLite database initialized at %s", DB_PATH)
     finally:
         conn.close()
 
+# ── Campaigns ─────────────────────────────────────────────────────────────────
 
 def save_campaign(
     campaign_id: str,
@@ -63,9 +84,9 @@ def save_campaign(
     telco: str,
     language: str,
     result: dict[str, Any],
+    team: str = "default",  # Optional param for future use
 ) -> dict[str, Any]:
     """Save a campaign to the database. Returns the saved campaign summary."""
-    # Extract quick-display fields
     final_scripts = result.get("final_scripts", result.get("revised_scripts_round_1", result.get("initial_scripts", {})))
     scripts = final_scripts.get("scripts", [])
     script_count = len(scripts)
@@ -73,101 +94,122 @@ def save_campaign(
     has_audio = 1 if any(not f.get("error") for f in audio_files) else 0
 
     now = datetime.now(timezone.utc).isoformat()
-    result_json = json.dumps(result, default=str)
+    result_json = result
 
-    conn = _get_conn()
-    try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO campaigns
-                (id, name, created_by, created_at, country, telco, language, result_json, script_count, has_audio)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (campaign_id, name, created_by, now, country, telco, language, result_json, script_count, has_audio),
-        )
-        conn.commit()
-        logger.info("Saved campaign '%s' (id=%s, scripts=%d)", name, campaign_id, script_count)
-    finally:
-        conn.close()
-
-    return {
+    campaign_data = {
         "id": campaign_id,
         "name": name,
         "created_by": created_by,
+        "team": team,
         "created_at": now,
         "country": country,
         "telco": telco,
         "language": language,
+        "result_json": result_json,
         "script_count": script_count,
         "has_audio": bool(has_audio),
     }
 
+    if supabase:
+        try:
+            supabase.table("campaigns").upsert(campaign_data).execute()
+            logger.info("Saved campaign '%s' to Supabase", name)
+        except Exception as e:
+            logger.error("Failed to save campaign to Supabase: %s", e)
+            raise e
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO campaigns
+                    (id, name, created_by, team, created_at, country, telco, language, result_json, script_count, has_audio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (campaign_id, name, created_by, team, now, country, telco, language, json.dumps(result_json, default=str), script_count, has_audio),
+            )
+            conn.commit()
+            logger.info("Saved campaign '%s' to SQLite", name)
+        finally:
+            conn.close()
 
-def list_campaigns() -> list[dict[str, Any]]:
+    # Drop result_json from returned summary
+    summary = campaign_data.copy()
+    summary.pop("result_json")
+    return summary
+
+
+def list_campaigns(limit: int = 50) -> list[dict[str, Any]]:
     """List all campaigns (without full result JSON)."""
-    conn = _get_conn()
+    if supabase:
+        try:
+            response = supabase.table("campaigns").select(
+                "id, name, created_by, team, created_at, country, telco, language, script_count, has_audio"
+            ).order("created_at", desc=True).limit(limit).execute()
+            return response.data
+        except Exception as e:
+            logger.error("Failed to list campaigns from Supabase: %s", e)
+            return []
+
+    conn = _get_sqlite_conn()
     try:
         rows = conn.execute(
             """
-            SELECT id, name, created_by, created_at, country, telco, language, script_count, has_audio
+            SELECT id, name, created_by, team, created_at, country, telco, language, script_count, has_audio
             FROM campaigns
-            ORDER BY created_at DESC
-            """
+            ORDER BY created_at DESC LIMIT ?
+            """, (limit,)
         ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "created_by": row["created_by"],
-                "created_at": row["created_at"],
-                "country": row["country"],
-                "telco": row["telco"],
-                "language": row["language"],
-                "script_count": row["script_count"],
-                "has_audio": bool(row["has_audio"]),
-            }
-            for row in rows
-        ]
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 
 
 def get_campaign(campaign_id: str) -> Optional[dict[str, Any]]:
-    """Get a single campaign with full result JSON."""
-    conn = _get_conn()
+    """Get a single campaign with full result JSON.
+
+    Returns dict with ``result`` key (not ``result_json``) for consistency.
+    """
+    if supabase:
+        try:
+            response = supabase.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
+            data = response.data
+            if not data:
+                return None
+            data["result"] = data.pop("result_json", {})
+            return data
+        except Exception as e:
+            logger.error("Failed to get campaign from Supabase: %s", e)
+            return None
+
+    conn = _get_sqlite_conn()
     try:
-        row = conn.execute(
-            "SELECT * FROM campaigns WHERE id = ?", (campaign_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
         if not row:
             return None
-        return {
-            "id": row["id"],
-            "name": row["name"],
-            "created_by": row["created_by"],
-            "created_at": row["created_at"],
-            "country": row["country"],
-            "telco": row["telco"],
-            "language": row["language"],
-            "script_count": row["script_count"],
-            "has_audio": bool(row["has_audio"]),
-            "result": json.loads(row["result_json"]),
-        }
+        data = dict(row)
+        data["result"] = json.loads(data.pop("result_json"))
+        return data
     finally:
         conn.close()
 
 
 def delete_campaign(campaign_id: str) -> bool:
     """Delete a campaign and its comments. Returns True if a row was deleted."""
-    conn = _get_conn()
+    if supabase:
+        try:
+            response = supabase.table("campaigns").delete().eq("id", campaign_id).execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error("Failed to delete campaign from Supabase: %s", e)
+            return False
+
+    conn = _get_sqlite_conn()
     try:
         conn.execute("DELETE FROM campaign_comments WHERE campaign_id = ?", (campaign_id,))
         cursor = conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
         conn.commit()
-        deleted = cursor.rowcount > 0
-        if deleted:
-            logger.info("Deleted campaign id=%s", campaign_id)
-        return deleted
+        return cursor.rowcount > 0
     finally:
         conn.close()
 
@@ -182,17 +224,7 @@ def save_comment(
 ) -> dict[str, Any]:
     """Save a comment on a campaign."""
     now = datetime.now(timezone.utc).isoformat()
-    conn = _get_conn()
-    try:
-        conn.execute(
-            "INSERT INTO campaign_comments (id, campaign_id, username, text, created_at) VALUES (?, ?, ?, ?, ?)",
-            (comment_id, campaign_id, username, text, now),
-        )
-        conn.commit()
-        logger.info("Saved comment %s on campaign %s", comment_id, campaign_id)
-    finally:
-        conn.close()
-    return {
+    comment_data = {
         "id": comment_id,
         "campaign_id": campaign_id,
         "username": username,
@@ -200,32 +232,58 @@ def save_comment(
         "created_at": now,
     }
 
+    if supabase:
+        try:
+            supabase.table("campaign_comments").insert(comment_data).execute()
+        except Exception as e:
+            logger.error("Failed to save comment to Supabase: %s", e)
+            raise e
+    else:
+        conn = _get_sqlite_conn()
+        try:
+            conn.execute(
+                "INSERT INTO campaign_comments (id, campaign_id, username, text, created_at) VALUES (?, ?, ?, ?, ?)",
+                (comment_id, campaign_id, username, text, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return comment_data
+
 
 def list_comments(campaign_id: str) -> list[dict[str, Any]]:
     """List all comments for a campaign, newest first."""
-    conn = _get_conn()
+    if supabase:
+        try:
+            response = supabase.table("campaign_comments").select("*").eq("campaign_id", campaign_id).order("created_at", desc=True).execute()
+            return response.data
+        except Exception as e:
+            logger.error("Failed to list comments from Supabase: %s", e)
+            return []
+
+    conn = _get_sqlite_conn()
     try:
         rows = conn.execute(
             "SELECT id, campaign_id, username, text, created_at FROM campaign_comments WHERE campaign_id = ? ORDER BY created_at DESC",
             (campaign_id,),
         ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "campaign_id": row["campaign_id"],
-                "username": row["username"],
-                "text": row["text"],
-                "created_at": row["created_at"],
-            }
-            for row in rows
-        ]
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 
 
 def delete_comment(comment_id: str) -> bool:
-    """Delete a comment. Returns True if a row was deleted."""
-    conn = _get_conn()
+    """Delete a comment."""
+    if supabase:
+        try:
+            response = supabase.table("campaign_comments").delete().eq("id", comment_id).execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error("Failed to delete comment from Supabase: %s", e)
+            return False
+
+    conn = _get_sqlite_conn()
     try:
         cursor = conn.execute("DELETE FROM campaign_comments WHERE id = ?", (comment_id,))
         conn.commit()

@@ -21,6 +21,11 @@ backend/outputs/
 
 # Campaign database (user data)
 backend/campaigns.db
+campaigns.db
+
+# Build artifacts
+frontend/tsconfig.tsbuildinfo
+bkp.txty
 
 # IDE
 .vscode/

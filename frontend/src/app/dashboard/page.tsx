@@ -343,11 +343,10 @@ export default function DashboardPage() {
                 {filtered.map((campaign) => (
                   <div
                     key={campaign.id}
-                    className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-all duration-200 group ${
-                      expandedId === campaign.id
-                        ? "border-[var(--accent)]/30 shadow-lg shadow-[var(--accent)]/5"
-                        : "border-[var(--card-border)] hover:border-[var(--card-border-hover)]"
-                    }`}
+                    className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-all duration-200 group ${expandedId === campaign.id
+                      ? "border-[var(--accent)]/30 shadow-lg shadow-[var(--accent)]/5"
+                      : "border-[var(--card-border)] hover:border-[var(--card-border-hover)]"
+                      }`}
                   >
                     {/* Header row */}
                     <div
@@ -419,6 +418,33 @@ export default function DashboardPage() {
                           </div>
                         ) : detail ? (
                           <div className="space-y-3 mt-4">
+                            {/* Global session actions */}
+                            <div className="flex items-center justify-between pb-3 border-b border-[var(--card-border)] mb-4">
+                              <h4 className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-semibold">
+                                Campaign Assets
+                              </h4>
+                              <div className="flex items-center gap-2">
+                                <a
+                                  href={`/api/sessions/${campaign.id}/scripts?fmt=text`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                                >
+                                  <Download className="w-2.5 h-2.5" />
+                                  Scripts (Text)
+                                </a>
+                                <a
+                                  href={`/api/sessions/${campaign.id}/scripts?fmt=json`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                                >
+                                  <Download className="w-2.5 h-2.5" />
+                                  Scripts (JSON)
+                                </a>
+                              </div>
+                            </div>
+
                             {/* Script + Audio paired cards */}
                             {scripts.length > 0 && (
                               <div className="space-y-2.5">
@@ -438,6 +464,15 @@ export default function DashboardPage() {
                                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
                                             V{vid}
                                           </span>
+                                          <a
+                                            href={`/api/sessions/${campaign.id}/scripts?fmt=text&variant_id=${vid}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            title="Download this script variant"
+                                            className="p-1 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
+                                          >
+                                            <Download className="w-3 h-3" />
+                                          </a>
                                           {script.theme && (
                                             <span className="text-xs font-medium text-[var(--text-secondary)]">
                                               {script.theme}
@@ -451,7 +486,7 @@ export default function DashboardPage() {
 
                                       {/* Script text */}
                                       {script.full_script && (
-                                        <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed mb-3 line-clamp-3">
+                                        <p className="text-xs text-[var(--text-secondary)] leading-relaxed mb-3 whitespace-pre-wrap max-h-[150px] overflow-y-auto p-2 rounded-lg bg-[var(--input-bg)]/50 border border-[var(--card-border)]/50">
                                           {script.full_script}
                                         </p>
                                       )}
@@ -460,18 +495,17 @@ export default function DashboardPage() {
                                       {variantAudio.length > 0 && (
                                         <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
                                           {variantAudio.map((af: AudioFile, ai: number) => {
-                                            const audioUrl = `/outputs/${audioSessionId}/${af.file_name}`;
+                                            const audioUrl = `/api/audio/${audioSessionId}/${af.file_name}`;
                                             const label = af.file_name?.replace(/\.mp3$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
                                             const isPlaying = playingAudio === audioUrl;
                                             return (
                                               <div key={ai} className="flex items-center gap-1.5">
                                                 <button
                                                   onClick={() => toggleAudio(audioUrl)}
-                                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${
-                                                    isPlaying
-                                                      ? "bg-[var(--accent)] text-white shadow-sm"
-                                                      : "bg-[var(--card)] border border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
-                                                  }`}
+                                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${isPlaying
+                                                    ? "bg-[var(--accent)] text-white shadow-sm"
+                                                    : "bg-[var(--card)] border border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
+                                                    }`}
                                                 >
                                                   <Play className={`w-2.5 h-2.5 ${isPlaying ? "animate-pulse" : ""}`} />
                                                   {label}
