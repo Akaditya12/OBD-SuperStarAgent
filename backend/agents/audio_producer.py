@@ -83,6 +83,7 @@ COUNTRY_LOCALE: dict[str, str] = {
     "Zambia": "en-ZA", "Zimbabwe": "en-ZA", "Botswana": "en-ZA",
     "Somalia": "so-SO", "Bangladesh": "bn-IN", "Pakistan": "ur-PK",
     "Indonesia": "id-ID", "Philippines": "fil-PH",
+    "Guyana": "en-US", "Haiti": "fr-FR",
 }
 
 # Prosody per section type -- warm and clear with slight variation
@@ -161,6 +162,18 @@ LANGUAGE_TO_LOCALE: dict[str, str] = {
     "amharic": "am-ET", "french": "fr-FR", "arabic": "ar-SA",
     "portuguese": "pt-BR", "indonesian": "id-ID", "filipino": "fil-PH",
     "somali": "so-SO", "zulu": "zu-ZA", "afrikaans": "en-ZA",
+    "setswana": "en-ZA", "tswana": "en-ZA",
+    "haitian creole": "fr-FR", "creolese": "en-US",
+    "pidgin english": "en-NG", "pidgin": "en-NG",
+    "kinyarwanda": "en-KE", "wolof": "fr-FR",
+    "lingala": "fr-FR", "luganda": "en-KE",
+    "shona": "en-ZA", "ndebele": "en-ZA",
+    "yoruba": "en-NG", "igbo": "en-NG", "hausa": "en-NG",
+    "twi": "en-GH", "bemba": "en-ZA", "nyanja": "en-ZA",
+    "xhosa": "en-ZA", "tagalog": "fil-PH",
+    "kannada": "kn-IN", "malayalam": "ml-IN",
+    "punjabi": "pa-IN", "gujarati": "gu-IN",
+    "oromo": "en-KE",
 }
 
 

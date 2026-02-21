@@ -458,13 +458,32 @@ async def extract_text_from_file(file: UploadFile = File(...)):
                         text_parts.append(shape.text)
             text = "\n\n".join(text_parts)
 
-        elif ext in (".txt", ".md"):
+        elif ext == ".csv":
+            text = content.decode("utf-8", errors="replace")
+
+        elif ext in (".xlsx", ".xls"):
+            import io
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+                text_parts = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        row_text = ", ".join(str(cell) for cell in row if cell is not None)
+                        if row_text.strip():
+                            text_parts.append(row_text)
+                text = "\n".join(text_parts)
+                wb.close()
+            except ImportError:
+                text = content.decode("utf-8", errors="replace")
+
+        elif ext in (".txt", ".md", ".json", ".rtf"):
             text = content.decode("utf-8", errors="replace")
 
         else:
             return JSONResponse(
                 status_code=400,
-                content={"error": f"Unsupported file type: {ext}"},
+                content={"error": f"Unsupported file type: {ext}. Supported: PDF, DOCX, PPTX, TXT, CSV, XLSX, MD, JSON"},
             )
 
         if not text.strip():
@@ -630,35 +649,31 @@ async def list_audio_files(session_id: str):
 
 
 @app.get("/api/audio/{session_id}/{filename}")
-async def download_audio(session_id: str, filename: str):
-    """Download a specific audio file."""
-    # Support for direct download via proxy
-    download = True  # Default to download for this endpoint
-
-    # Check if we should serve from Supabase
-    if session_id in sessions and "audio" in sessions[session_id]:
-        audio_files = sessions[session_id]["audio"].get("audio_files", [])
-        for file_info in audio_files:
-            if file_info.get("file_name") == filename and file_info.get("public_url"):
-                import httpx
-                from fastapi.responses import StreamingResponse
-                
-                async def stream_remote():
-                    async with httpx.AsyncClient() as client:
-                        async with client.stream("GET", file_info["public_url"]) as resp:
-                            async for chunk in resp.aiter_bytes():
-                                yield chunk
-
-                return StreamingResponse(
-                    stream_remote(),
-                    media_type="audio/mpeg",
-                    headers={"Content-Disposition": f"attachment; filename={filename}"}
-                )
-
-    # Fallback to local file
+async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
+    """Download a specific audio file. Use ?fmt=wav for WAV format."""
     file_path = OUTPUTS_DIR / session_id / filename
     if not file_path.exists():
         return JSONResponse(status_code=404, content={"error": "File not found"})
+
+    if fmt == "wav" and filename.endswith(".mp3"):
+        try:
+            from pydub import AudioSegment
+            import io as _io
+            seg = AudioSegment.from_mp3(str(file_path))
+            buf = _io.BytesIO()
+            seg.export(buf, format="wav")
+            buf.seek(0)
+            wav_name = filename.rsplit(".", 1)[0] + ".wav"
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                buf,
+                media_type="audio/wav",
+                headers={"Content-Disposition": f"attachment; filename={wav_name}"},
+            )
+        except Exception as e:
+            logger.error("WAV conversion failed: %s", e)
+            return JSONResponse(status_code=500, content={"error": "WAV conversion failed"})
+
     return FileResponse(
         path=str(file_path),
         media_type="audio/mpeg",

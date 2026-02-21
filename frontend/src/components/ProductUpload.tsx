@@ -10,7 +10,7 @@ interface ProductUploadProps {
   onFileNameChange: (name: string) => void;
 }
 
-const BINARY_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".pptx"]);
+const BINARY_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".pptx", ".csv", ".xlsx", ".xls"]);
 
 export default function ProductUpload({
   value,
@@ -105,7 +105,7 @@ export default function ProductUpload({
       >
         <input
           type="file"
-          accept=".txt,.pdf,.doc,.docx,.pptx,.md"
+          accept=".txt,.pdf,.doc,.docx,.pptx,.md,.csv,.xlsx,.xls,.rtf,.json"
           onChange={handleFileInput}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           disabled={uploading}
@@ -125,7 +125,7 @@ export default function ProductUpload({
               <span className="text-[var(--accent)] underline">browse</span>
             </p>
             <p className="text-xs text-[var(--text-tertiary)] mt-1">
-              Supports .txt, .md, .pdf, .doc, .docx, .pptx
+              Supports PDF, DOCX, PPTX, TXT, CSV, XLSX, MD, JSON
             </p>
           </>
         )}

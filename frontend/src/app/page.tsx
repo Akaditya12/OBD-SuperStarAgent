@@ -808,8 +808,9 @@ export default function HomePage() {
           {voiceSelection && (
             <VoiceInfoPanel
               voiceSelection={voiceSelection}
-              ttsEngine={result?.audio?.tts_engine}
+              ttsEngine={resolvedEngine}
               edgeVoice={result?.audio?.voice_used?.voice_id}
+              hookPreviews={hookPreviews}
             />
           )}
 
