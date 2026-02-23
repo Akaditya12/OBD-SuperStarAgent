@@ -207,8 +207,42 @@ function HomePageContent() {
       };
 
       ws.onerror = () => {
-        setError("Connection lost. Check pipeline status.");
-        toast("warning", "WebSocket connection lost");
+        toast("warning", "Live connection lost — polling for result...");
+      };
+
+      ws.onclose = () => {
+        const sid = localStorage.getItem("obd_active_session");
+        if (!sid) return;
+        const poll = async () => {
+          for (let i = 0; i < 90; i++) {
+            await new Promise((r) => setTimeout(r, 4000));
+            try {
+              const res = await fetch(`/api/generate/${sid}/status`);
+              if (!res.ok) continue;
+              const data = await res.json();
+              if (data.status === "done" && data.result) {
+                setResult(data.result as PipelineResult);
+                setWizardStep("results");
+                localStorage.removeItem("obd_active_session");
+                toast("success", "Campaign generated successfully!");
+                return;
+              }
+              if (data.status === "error") {
+                setError(data.error || "Pipeline failed");
+                setWizardStep("results");
+                localStorage.removeItem("obd_active_session");
+                toast("error", data.error || "Pipeline failed");
+                return;
+              }
+              if (data.progress) {
+                for (const msg of data.progress) {
+                  updateStep(msg.agent || "", msg.status || "", msg.message || "");
+                }
+              }
+            } catch { /* retry */ }
+          }
+        };
+        poll();
       };
     },
     [updateStep, toast]
