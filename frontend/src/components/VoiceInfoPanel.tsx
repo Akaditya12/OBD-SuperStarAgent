@@ -76,7 +76,6 @@ export default function VoiceInfoPanel({
   const actualEngine = hookPreviews?.tts_engine || ttsEngine;
   const voicePool = hookPreviews?.voice_pool || [];
 
-  const rationale = voiceSelection?.rationale || "";
   const productionNotes = voiceSelection?.audio_production_notes || "";
   const voice_settings = voiceSelection?.voice_settings || {
     stability: 0.5,
@@ -86,6 +85,18 @@ export default function VoiceInfoPanel({
   };
 
   const currentPoolVoice = voicePool[activeVoiceIdx];
+  const currentVoiceName = currentPoolVoice?.voice_label || voiceSelection?.selected_voice?.name || "Voice";
+
+  const rawRationale = voiceSelection?.rationale || "";
+  const rationale = (() => {
+    if (voicePool.length > 0) {
+      const engineLabel = getEngineLabel(actualEngine || "");
+      return `${currentVoiceName} was selected by the ${engineLabel} engine based on the campaign's target market, language, and audience profile. ${
+        productionNotes || "The voice is optimized for clarity, warmth, and natural delivery in promotional OBD calls."
+      }`;
+    }
+    return rawRationale;
+  })();
 
   return (
     <div className="space-y-4">

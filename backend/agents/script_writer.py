@@ -245,15 +245,28 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         all_scripts: list[dict[str, Any]] = []
         for i, res in enumerate(batch_results):
             if isinstance(res, Exception):
-                logger.error(f"[{self.name}] Batch {i+1} failed: {res}")
-                continue
-            all_scripts.extend(res)
+                logger.warning(f"[{self.name}] Batch {i+1} failed: {res} -- retrying once")
+                try:
+                    retry = await self._generate_batch(
+                        brief_summary, market_summary, batches[i][0], batches[i][1], language_override
+                    )
+                    all_scripts.extend(retry)
+                except Exception as retry_err:
+                    logger.error(f"[{self.name}] Batch {i+1} retry also failed: {retry_err}")
+            else:
+                all_scripts.extend(res)
 
-        # Re-number variant IDs sequentially
+        # Re-number variant IDs sequentially (always 1-based)
         for idx, script in enumerate(all_scripts):
             script["variant_id"] = idx + 1
 
         logger.info(f"[{self.name}] Total scripts generated: {len(all_scripts)}")
+
+        if len(all_scripts) < NUM_SCRIPT_VARIANTS:
+            logger.warning(
+                f"[{self.name}] Only {len(all_scripts)}/{NUM_SCRIPT_VARIANTS} variants generated. "
+                f"Some batches may have failed."
+            )
 
         result: dict[str, Any] = {
             "scripts": all_scripts,
@@ -338,12 +351,15 @@ Output valid JSON with "scripts" array of {count} objects.\
         all_revised: list[dict[str, Any]] = []
         for i, res in enumerate(batch_results):
             if isinstance(res, Exception):
-                logger.error(f"[{self.name}] Revision batch {i+1} failed: {res}")
-                all_revised.extend(batches[i])  # Keep originals on failure
-                continue
-            all_revised.extend(res)
+                logger.warning(f"[{self.name}] Revision batch {i+1} failed: {res} -- keeping originals")
+                all_revised.extend(batches[i])
+            else:
+                all_revised.extend(res)
 
+        # Re-number sequentially to guarantee 1-based IDs
         all_revised.sort(key=lambda s: s.get("variant_id", 0))
+        for idx, script in enumerate(all_revised):
+            script["variant_id"] = idx + 1
 
         result: dict[str, Any] = {
             "scripts": all_revised,
@@ -380,6 +396,18 @@ Output valid JSON with "scripts" array of {count} objects.\
                 script["variant_id"] = i + 1
             if "full_script" not in script and "hook" in script:
                 script["full_script"] = f"{script.get('hook', '')} {script.get('body', '')} {script.get('cta', '')}"
+            if not script.get("fallback_1"):
+                script["fallback_1"] = (
+                    "Don't miss out! This exclusive offer won't last long. Press 1 now to grab it before it's gone!"
+                )
+            if not script.get("fallback_2"):
+                script["fallback_2"] = (
+                    "Last chance! Thousands are already enjoying this. Press 1 now or you may miss this opportunity."
+                )
+            if not script.get("polite_closure"):
+                script["polite_closure"] = (
+                    "Thank you for your time. Have a wonderful day!"
+                )
 
         return result
 

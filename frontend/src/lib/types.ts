@@ -93,6 +93,7 @@ export interface AudioFile {
   error?: string;
   voice_index?: number;
   voice_label?: string;
+  public_url?: string;
 }
 
 export interface AudioResult {

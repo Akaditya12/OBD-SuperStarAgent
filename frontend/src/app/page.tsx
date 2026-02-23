@@ -119,6 +119,7 @@ export default function HomePage() {
   // Hook preview voice selection & full audio generation
   const [voiceChoices, setVoiceChoices] = useState<Record<number, number>>({});
   const [bgmStyle, setBgmStyle] = useState<"upbeat" | "calm" | "corporate">("upbeat");
+  const [audioFormat, setAudioFormat] = useState<"mp3" | "wav">("mp3");
   const [generatingFullAudio, setGeneratingFullAudio] = useState(false);
   const [bgmPreviewPlaying, setBgmPreviewPlaying] = useState<string | null>(null);
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -475,6 +476,7 @@ export default function HomePage() {
           body: JSON.stringify({
             voice_choices: voiceChoices,
             bgm_style: bgmStyle,
+            audio_format: audioFormat,
             tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
             scripts: finalScripts,
             voice_selection: result.voice_selection,
@@ -529,6 +531,7 @@ export default function HomePage() {
     setCampaignName("");
     setVoiceChoices({});
     setBgmStyle("upbeat");
+    setAudioFormat("mp3");
     setGeneratingFullAudio(false);
     setBgmPreviewPlaying(null);
     if (bgmAudioRef.current) bgmAudioRef.current.pause();
@@ -1012,7 +1015,7 @@ export default function HomePage() {
                         {voiceIndices.map((voiceIdx) => {
                           const preview = variantPreviews.find((af: AudioFile) => (af.voice_index || 1) === voiceIdx);
                           if (!preview) return null;
-                          const audioUrl = `/api/audio/${hookSessionId}/${preview.file_name}`;
+                          const audioUrl = preview.public_url || `/api/audio/${hookSessionId}/${preview.file_name}`;
                           const isPlaying = playingAudio === audioUrl;
                           const isSelected = selectedVoice === voiceIdx;
                           const voiceLabel = preview.voice_label || voicePool.find(v => v.voice_index === voiceIdx)?.voice_label || `Voice ${voiceIdx}`;
@@ -1113,6 +1116,35 @@ export default function HomePage() {
                   </div>
                 </div>
 
+                {/* Audio Format Picker */}
+                <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-3">
+                    <Download className="w-4 h-4 text-[var(--accent)]" />
+                    Audio Output Format
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { id: "mp3" as const, label: "MP3", desc: "Smaller size, widely compatible" },
+                      { id: "wav" as const, label: "WAV", desc: "Lossless, higher quality" },
+                    ]).map((fmt) => (
+                      <button
+                        key={fmt.id}
+                        type="button"
+                        onClick={() => setAudioFormat(fmt.id)}
+                        className={`rounded-xl border px-3 py-2.5 text-left transition-all ${audioFormat === fmt.id
+                            ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
+                            : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
+                          }`}
+                      >
+                        <div className={`text-xs font-semibold ${audioFormat === fmt.id ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
+                          {fmt.label}
+                        </div>
+                        <div className="text-[10px] text-[var(--text-tertiary)]">{fmt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Generate Full Audio Button */}
                 <button
                   onClick={generateFullAudio}
@@ -1187,7 +1219,7 @@ export default function HomePage() {
                               )}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {voiceFiles.map((af: AudioFile, i: number) => {
-                                  const audioUrl = `/api/audio/${audioSessionId}/${af.file_name}`;
+                                  const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
                                   const isPlaying = playingAudio === audioUrl;
                                   return (
                                     <div

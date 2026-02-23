@@ -182,7 +182,7 @@ class PipelineOrchestrator:
                 })
 
                 # Revise
-                await self.on_progress("ScriptWriter", "started", {
+                await self.on_progress("ScriptWriter_Revision", "started", {
                     "message": f"Revising scripts based on feedback {round_label}..."
                 })
                 final_scripts = await self.script_writer.run(
@@ -193,7 +193,7 @@ class PipelineOrchestrator:
                     language_override=language,
                 )
                 results[f"revised_scripts_round_{round_num + 1}"] = final_scripts
-                await self.on_progress("ScriptWriter", "completed", {
+                await self.on_progress("ScriptWriter_Revision", "completed", {
                     "message": f"Scripts revised {round_label}",
                     "data": final_scripts,
                     "system_prompt": self.script_writer.last_system_prompt,
@@ -214,7 +214,7 @@ class PipelineOrchestrator:
             )
             results["voice_selection"] = voice_selection
             await self.on_progress("VoiceSelector", "completed", {
-                "message": f"Voice selected: {voice_selection.get('selected_voice', {}).get('name', 'Unknown')}",
+                "message": "Voice profile optimised for campaign",
                 "data": voice_selection,
                 "system_prompt": self.voice_selector.last_system_prompt,
                 "user_prompt": self.voice_selector.last_user_prompt,

@@ -1005,6 +1005,7 @@ class AudioProducerAgent(BaseAgent):
         self,
         jobs: list[dict[str, Any]],
         engine_ctx: dict[str, Any],
+        audio_format: str = "mp3",
     ) -> list[dict[str, Any]]:
         """Execute a list of TTS jobs with concurrency limiting."""
         tts_engine = engine_ctx["tts_engine"]
@@ -1051,28 +1052,45 @@ class AudioProducerAgent(BaseAgent):
                 result["theme"] = job.get("theme", "")
                 result["voice_index"] = job.get("voice_index", 1)
                 result["voice_label"] = job.get("voice_label", "Voice 1")
-                
-                # UPLOAD TO SUPABASE If Available
+
+                if audio_format == "wav":
+                    try:
+                        from pydub import AudioSegment
+                        mp3_path = Path(result["file_path"])
+                        if mp3_path.suffix.lower() == ".mp3" and mp3_path.exists():
+                            wav_path = mp3_path.with_suffix(".wav")
+                            seg = AudioSegment.from_mp3(str(mp3_path))
+                            seg.export(str(wav_path), format="wav")
+                            mp3_path.unlink(missing_ok=True)
+                            result["file_name"] = wav_path.name
+                            result["file_path"] = str(wav_path)
+                            result["file_size_bytes"] = wav_path.stat().st_size
+                    except Exception as wav_err:
+                        logger.warning(f"[{self.name}] WAV conversion failed: {wav_err}")
+
                 if supabase:
                     try:
                         file_path = Path(result["file_path"])
                         bucket_name = "audio-files"
-                        # Create unique path in bucket like session_id/filename
                         session_id = str(job["path"].parent.name)
                         storage_path = f"{session_id}/{file_path.name}"
-                        
-                        # Upload file
+                        content_type = "audio/wav" if file_path.suffix.lower() == ".wav" else "audio/mpeg"
+
                         with open(file_path, "rb") as f:
                             supabase.storage.from_(bucket_name).upload(
                                 path=storage_path,
                                 file=f,
-                                file_options={"content-type": "audio/mpeg"}
+                                file_options={"content-type": content_type},
                             )
-                        
-                        # Get public url
+
                         public_url = supabase.storage.from_(bucket_name).get_public_url(storage_path)
                         result["public_url"] = public_url
-                        logger.info(f"[{self.name}] Uploaded {file_path.name} to Supabase: {public_url}")
+                        logger.info(f"[{self.name}] Uploaded {file_path.name} to Supabase Storage")
+
+                        try:
+                            file_path.unlink()
+                        except OSError:
+                            pass
                     except Exception as upload_err:
                         logger.error(f"[{self.name}] Supabase upload failed for {job['path'].name}: {upload_err}")
                         
@@ -1229,6 +1247,7 @@ class AudioProducerAgent(BaseAgent):
         language: str | None = None,
         tts_engine_override: str | None = None,
         bgm_style: str = "upbeat",
+        audio_format: str = "mp3",
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Generate full audio for all sections using the user-chosen voice per variant.
@@ -1236,6 +1255,7 @@ class AudioProducerAgent(BaseAgent):
         Args:
             voice_choices: mapping of variant_id -> voice_index (1-based).
             bgm_style: one of "upbeat", "calm", "corporate".
+            audio_format: "mp3" or "wav" -- if wav, files are converted before upload.
         """
         session_dir = OUTPUTS_DIR / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -1278,9 +1298,9 @@ class AudioProducerAgent(BaseAgent):
 
         logger.info(
             f"[{self.name}] Generating {len(jobs)} final audio files via {tts_engine} "
-            f"(bgm={bgm_style})"
+            f"(bgm={bgm_style}, fmt={audio_format})"
         )
-        results = await self._run_tts_jobs(jobs, engine_ctx)
+        results = await self._run_tts_jobs(jobs, engine_ctx, audio_format=audio_format)
 
         successful = [r for r in results if "error" not in r]
         failed = [r for r in results if "error" in r]
@@ -1322,7 +1342,7 @@ class AudioProducerAgent(BaseAgent):
                         }
                         rj.update(voice_pool[chosen_idx])
                         retry_jobs.append(rj)
-                results = await self._run_tts_jobs(retry_jobs, engine_ctx)
+                results = await self._run_tts_jobs(retry_jobs, engine_ctx, audio_format=audio_format)
                 successful = [r for r in results if "error" not in r]
                 failed = [r for r in results if "error" in r]
                 if len(successful) > 0:

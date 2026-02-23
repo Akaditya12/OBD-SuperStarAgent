@@ -495,8 +495,8 @@ export default function DashboardPage() {
                                       {variantAudio.length > 0 && (
                                         <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
                                           {variantAudio.map((af: AudioFile, ai: number) => {
-                                            const audioUrl = `/api/audio/${audioSessionId}/${af.file_name}`;
-                                            const label = af.file_name?.replace(/\.mp3$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
+                                            const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
+                                            const label = af.file_name?.replace(/\.(mp3|wav)$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
                                             const isPlaying = playingAudio === audioUrl;
                                             return (
                                               <div key={ai} className="flex items-center gap-1.5">

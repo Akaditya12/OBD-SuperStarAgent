@@ -1,6 +1,13 @@
 -- OBD SuperStar Agent - Supabase Schema Deployment
 -- This script creates the necessary tables, sets up Row Level Security (RLS),
 -- and prepares the database for multi-user, multi-tenant operation.
+--
+-- IMPORTANT: After running this SQL, create the Storage bucket manually:
+--   1. Go to Supabase Dashboard > Storage
+--   2. Click "New Bucket"
+--   3. Name: "audio-files"
+--   4. Toggle "Public bucket" ON (so audio URLs work without auth tokens)
+--   5. Click "Create bucket"
 
 -- 1. Create Users Table
 CREATE TABLE IF NOT EXISTS public.users (

@@ -416,6 +416,59 @@ async def deactivate_user(user_id: str, request: Request):
         return JSONResponse(status_code=500, content={"error": "Database error"})
 
 
+@app.post("/api/admin/cleanup")
+async def admin_cleanup(request: Request):
+    """Delete local output directories older than N hours. Admin only."""
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    max_age_hours = body.get("max_age_hours", 2)
+    deleted, freed = _cleanup_outputs(max_age_hours)
+    return {
+        "deleted_sessions": deleted,
+        "freed_mb": round(freed / (1024 * 1024), 1),
+    }
+
+
+def _cleanup_outputs(max_age_hours: float = 2) -> tuple[int, int]:
+    """Remove session output dirs older than *max_age_hours*. Returns (count, bytes)."""
+    import time
+    cutoff = time.time() - (max_age_hours * 3600)
+    deleted = 0
+    freed = 0
+    if not OUTPUTS_DIR.exists():
+        return 0, 0
+    for child in OUTPUTS_DIR.iterdir():
+        if not child.is_dir() or child.name.startswith("_"):
+            continue
+        try:
+            mtime = max(f.stat().st_mtime for f in child.rglob("*") if f.is_file()) if any(child.rglob("*")) else child.stat().st_mtime
+        except (StopIteration, OSError):
+            mtime = child.stat().st_mtime
+        if mtime < cutoff:
+            size = sum(f.stat().st_size for f in child.rglob("*") if f.is_file())
+            import shutil
+            shutil.rmtree(child, ignore_errors=True)
+            deleted += 1
+            freed += size
+    if deleted:
+        logger.info(f"Cleanup: removed {deleted} session dirs, freed {freed / (1024*1024):.1f} MB")
+    return deleted, freed
+
+
+async def _periodic_cleanup():
+    """Background task: clean up old outputs every hour."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            _cleanup_outputs(max_age_hours=2)
+        except Exception as e:
+            logger.error(f"Periodic cleanup failed: {e}")
+
+
+@app.on_event("startup")
+async def _on_startup():
+    _cleanup_outputs(max_age_hours=24)
+    asyncio.create_task(_periodic_cleanup())
+
 
 # ── File Upload / Text Extraction ──
 
@@ -639,7 +692,7 @@ async def list_audio_files(session_id: str):
         return JSONResponse(status_code=404, content={"error": "Session not found"})
 
     files = []
-    for f in sorted(session_dir.glob("*.mp3")):
+    for f in sorted(list(session_dir.glob("*.mp3")) + list(session_dir.glob("*.wav"))):
         files.append({
             "name": f.name,
             "size_bytes": f.stat().st_size,
@@ -650,12 +703,31 @@ async def list_audio_files(session_id: str):
 
 @app.get("/api/audio/{session_id}/{filename}")
 async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
-    """Download a specific audio file. Use ?fmt=wav for WAV format."""
+    """Download a specific audio file.
+
+    If the file was uploaded to Supabase Storage, redirect to the CDN URL.
+    Otherwise serve from local disk (local dev fallback).
+    """
+    from starlette.responses import RedirectResponse
+
+    public_url = _find_public_url(session_id, filename)
+    if public_url:
+        return RedirectResponse(url=public_url, status_code=302)
+
     file_path = OUTPUTS_DIR / session_id / filename
     if not file_path.exists():
-        return JSONResponse(status_code=404, content={"error": "File not found"})
+        wav_alt = file_path.parent / (file_path.stem + ".wav")
+        mp3_alt = file_path.parent / (file_path.stem + ".mp3")
+        if wav_alt.exists():
+            file_path = wav_alt
+        elif mp3_alt.exists():
+            file_path = mp3_alt
+        else:
+            return JSONResponse(status_code=404, content={"error": "File not found"})
 
-    if fmt == "wav" and filename.endswith(".mp3"):
+    actual_ext = file_path.suffix.lower()
+
+    if fmt == "wav" and actual_ext == ".mp3":
         try:
             from pydub import AudioSegment
             import io as _io
@@ -663,7 +735,7 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
             buf = _io.BytesIO()
             seg.export(buf, format="wav")
             buf.seek(0)
-            wav_name = filename.rsplit(".", 1)[0] + ".wav"
+            wav_name = file_path.stem + ".wav"
             from fastapi.responses import StreamingResponse
             return StreamingResponse(
                 buf,
@@ -674,11 +746,32 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
             logger.error("WAV conversion failed: %s", e)
             return JSONResponse(status_code=500, content={"error": "WAV conversion failed"})
 
+    media_type = "audio/wav" if actual_ext == ".wav" else "audio/mpeg"
     return FileResponse(
         path=str(file_path),
-        media_type="audio/mpeg",
-        filename=filename,
+        media_type=media_type,
+        filename=file_path.name,
     )
+
+
+def _find_public_url(session_id: str, filename: str) -> str | None:
+    """Look up a Supabase public_url for an audio file from in-memory session data."""
+    result = sessions.get(session_id)
+    if not result:
+        for pstate in pipelines.values():
+            r = pstate.result
+            if r and (r.get("session_id") == session_id):
+                result = r
+                break
+    if not result:
+        return None
+    audio = result.get("audio", {})
+    stem = Path(filename).stem
+    for af in audio.get("audio_files", []):
+        af_stem = Path(af.get("file_name", "")).stem
+        if af_stem == stem and af.get("public_url"):
+            return af["public_url"]
+    return None
 
 
 @app.get("/api/sessions/{session_id}/scripts")
@@ -867,6 +960,7 @@ async def generate_full_audio(session_id: str, request: Request):
     voice_choices_raw = body.get("voice_choices", {})
     voice_choices = {int(k): int(v) for k, v in voice_choices_raw.items()}
     bgm_style = body.get("bgm_style", "upbeat")
+    audio_format = body.get("audio_format", "mp3")
     tts_engine_choice = body.get("tts_engine")
 
     result = sessions.get(session_id)
@@ -913,6 +1007,7 @@ async def generate_full_audio(session_id: str, request: Request):
                 language=language_val,
                 tts_engine_override=tts_engine_choice or (result or {}).get("tts_engine_choice") or None,
                 bgm_style=bgm_style,
+                audio_format=audio_format,
             )
             if result:
                 result["audio"] = audio_result
@@ -1366,6 +1461,7 @@ def _is_json_serializable(value: Any) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
 
 
 def _make_serializable(obj: Any) -> Any:
