@@ -22,7 +22,7 @@ from backend.config import SUPABASE_URL
 logger = logging.getLogger(__name__)
 
 # ── Config ──
-JWT_SECRET = os.getenv("JWT_SECRET", "obd-superstar-default-secret-change-me")
+JWT_SECRET = os.getenv("JWT_SECRET", "obd-superstar-default-secret-change-me").strip()
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 72  # 3 days
 
