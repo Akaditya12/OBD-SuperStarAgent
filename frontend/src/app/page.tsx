@@ -115,6 +115,7 @@ function HomePageContent() {
 
   // Audio
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const [loadingAudio, setLoadingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Script expand & edit
@@ -369,17 +370,26 @@ function HomePageContent() {
 
   // ── Audio playback ──
   const toggleAudio = (url: string) => {
-    if (playingAudio === url) {
+    if (playingAudio === url || loadingAudio === url) {
       audioRef.current?.pause();
       setPlayingAudio(null);
-    } else {
-      if (audioRef.current) audioRef.current.pause();
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.play();
-      audio.onended = () => setPlayingAudio(null);
-      setPlayingAudio(url);
+      setLoadingAudio(null);
+      return;
     }
+    if (audioRef.current) audioRef.current.pause();
+    setLoadingAudio(url);
+    setPlayingAudio(null);
+    const audio = new Audio(url);
+    audio.preload = "auto";
+    audioRef.current = audio;
+    audio.oncanplaythrough = () => {
+      setLoadingAudio(null);
+      setPlayingAudio(url);
+      audio.play().catch(() => { setPlayingAudio(null); });
+    };
+    audio.onended = () => { setPlayingAudio(null); setLoadingAudio(null); };
+    audio.onerror = () => { setPlayingAudio(null); setLoadingAudio(null); };
+    audio.load();
   };
 
   // ── Copy script ──
@@ -1063,6 +1073,7 @@ function HomePageContent() {
                           if (!preview) return null;
                           const audioUrl = preview.public_url || `/api/audio/${hookSessionId}/${preview.file_name}`;
                           const isPlaying = playingAudio === audioUrl;
+                          const isLoading = loadingAudio === audioUrl;
                           const isSelected = selectedVoice === voiceIdx;
                           const voiceLabel = preview.voice_label || voicePool.find(v => v.voice_index === voiceIdx)?.voice_label || `Voice ${voiceIdx}`;
 
@@ -1090,10 +1101,12 @@ function HomePageContent() {
                                 onClick={(e) => { e.preventDefault(); toggleAudio(audioUrl); }}
                                 className={`p-2 rounded-lg transition-colors flex-shrink-0 ${isPlaying
                                     ? "bg-[var(--accent)] text-white"
-                                    : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                    : isLoading
+                                      ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
+                                      : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                                   }`}
                               >
-                                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                                {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                               </button>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-medium text-[var(--text-primary)]">{voiceLabel}</p>
@@ -1267,6 +1280,7 @@ function HomePageContent() {
                                 {voiceFiles.map((af: AudioFile, i: number) => {
                                   const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
                                   const isPlaying = playingAudio === audioUrl;
+                                  const isLoading = loadingAudio === audioUrl;
                                   return (
                                     <div
                                       key={i}
@@ -1276,10 +1290,12 @@ function HomePageContent() {
                                         onClick={() => toggleAudio(audioUrl)}
                                         className={`p-2 rounded-lg transition-colors ${isPlaying
                                             ? "bg-[var(--accent)] text-white"
-                                            : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                            : isLoading
+                                              ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
+                                              : "bg-[var(--card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                                           }`}
                                       >
-                                        {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                                        {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                                       </button>
                                       <div className="flex-1 min-w-0">
                                         <p className="text-[11px] font-medium text-[var(--text-primary)] truncate">

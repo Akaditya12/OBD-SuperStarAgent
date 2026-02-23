@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
     Home,
     LayoutDashboard,
@@ -15,7 +16,8 @@ import {
     Shield,
     Mic2,
     Phone,
-    Package,
+    LogOut,
+    User,
 } from "lucide-react";
 import ThemePicker from "./ThemePicker";
 import BNGLogo from "./BNGLogo";
@@ -37,9 +39,11 @@ const BNG_PRODUCT_LIST = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const router = useRouter();
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
+    const [userName, setUserName] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -48,6 +52,7 @@ export default function Sidebar() {
                 const data = await res.json();
                 if (data.authenticated) {
                     setUserRole(data.role);
+                    setUserName(data.username || null);
                 }
             } catch (err) {
                 console.error("Failed to fetch user role", err);
@@ -55,6 +60,13 @@ export default function Sidebar() {
         };
         fetchUser();
     }, []);
+
+    const handleLogout = async () => {
+        try {
+            await fetch("/api/auth/logout", { method: "POST" });
+        } catch { /* best-effort */ }
+        router.push("/login");
+    };
 
     const navContent = (
         <div className="flex flex-col h-full">
@@ -159,6 +171,41 @@ export default function Sidebar() {
                     })}
                 </div>
             </div>
+
+            {/* User info + Logout */}
+            {userName && (
+                <div className="px-3 py-3 border-t border-[var(--card-border)]">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-[var(--accent-subtle)] flex items-center justify-center flex-shrink-0">
+                            <User className="w-4 h-4 text-[var(--accent)]" />
+                        </div>
+                        {!collapsed && (
+                            <div className="flex-1 min-w-0 animate-fade-in">
+                                <p className="text-xs font-semibold text-[var(--text-primary)] truncate">{userName}</p>
+                                <p className="text-[10px] text-[var(--text-tertiary)] capitalize">{userRole || "user"}</p>
+                            </div>
+                        )}
+                        {!collapsed && (
+                            <button
+                                onClick={handleLogout}
+                                title="Log out"
+                                className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 transition-colors flex-shrink-0"
+                            >
+                                <LogOut className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                    </div>
+                    {collapsed && (
+                        <button
+                            onClick={handleLogout}
+                            title="Log out"
+                            className="mt-2 w-full flex items-center justify-center p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                        >
+                            <LogOut className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Theme picker */}
             <div className="py-2 border-t border-[var(--card-border)]">

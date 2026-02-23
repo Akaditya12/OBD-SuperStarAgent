@@ -712,7 +712,11 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
 
     public_url = _find_public_url(session_id, filename)
     if public_url:
-        return RedirectResponse(url=public_url, status_code=302)
+        return RedirectResponse(
+            url=public_url,
+            status_code=302,
+            headers={"Cache-Control": "public, max-age=86400, immutable"},
+        )
 
     file_path = OUTPUTS_DIR / session_id / filename
     if not file_path.exists():
@@ -751,6 +755,7 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
         path=str(file_path),
         media_type=media_type,
         filename=file_path.name,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
     )
 
 
