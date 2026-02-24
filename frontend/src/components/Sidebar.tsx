@@ -49,19 +49,26 @@ export default function Sidebar() {
         const fetchUser = async () => {
             try {
                 const res = await fetch("/api/auth/me");
+                if (!res.ok) { setUserName(null); setUserRole(null); return; }
                 const data = await res.json();
                 if (data.authenticated) {
                     setUserRole(data.role);
                     setUserName(data.username || null);
+                } else {
+                    setUserName(null);
+                    setUserRole(null);
                 }
-            } catch (err) {
-                console.error("Failed to fetch user role", err);
+            } catch {
+                setUserName(null);
+                setUserRole(null);
             }
         };
         fetchUser();
-    }, []);
+    }, [pathname]);
 
     const handleLogout = async () => {
+        setUserName(null);
+        setUserRole(null);
         try {
             await fetch("/api/auth/logout", { method: "POST" });
         } catch { /* best-effort */ }
