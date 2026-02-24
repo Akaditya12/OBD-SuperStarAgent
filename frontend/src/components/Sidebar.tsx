@@ -155,11 +155,11 @@ export default function Sidebar() {
                 <div className="space-y-0.5">
                     {BNG_PRODUCT_LIST.map((product) => {
                         const Icon = product.icon;
-                        const isProductActive = pathname === `/product/${product.id}`;
+                        const isProductActive = pathname === "/" && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("product") === product.id;
                         return (
                             <Link
                                 key={product.id}
-                                href={`/product/${product.id}`}
+                                href={`/?product=${product.id}`}
                                 onClick={() => setMobileOpen(false)}
                                 className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-200 group ${isProductActive
                                         ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
