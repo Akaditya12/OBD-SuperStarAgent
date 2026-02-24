@@ -40,12 +40,12 @@ export default function PresenceBar({ users, maxVisible = 5 }: PresenceBarProps)
                     </div>
                 ))}
                 {overflow > 0 && (
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold text-gray-400 bg-gray-800 border-2 border-[var(--card)]">
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold text-[var(--text-tertiary)] bg-[var(--input-bg)] border-2 border-[var(--card)]">
                         +{overflow}
                     </div>
                 )}
             </div>
-            <span className="text-[10px] text-gray-500 ml-1">
+            <span className="text-[10px] text-[var(--text-tertiary)] ml-1">
                 {users.length} online
             </span>
         </div>

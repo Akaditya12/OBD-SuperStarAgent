@@ -15,7 +15,6 @@ import {
   Calendar,
 } from "lucide-react";
 import StatsCards from "@/components/StatsCards";
-import PresenceBar from "@/components/PresenceBar";
 import CommentThread from "@/components/CommentThread";
 import ActivityFeed from "@/components/ActivityFeed";
 import { useToast } from "@/components/ToastProvider";
@@ -361,15 +360,11 @@ export default function DashboardPage() {
                         }
                       }}
                     >
-                      <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2.5 mb-1.5">
                           <h3 className="text-sm font-semibold text-[var(--text-primary)] truncate">
                             {campaign.name}
                           </h3>
-                          <PresenceBar
-                            users={expandedId === campaign.id ? presenceUsers : []}
-                            maxVisible={3}
-                          />
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                           {campaign.country && (
@@ -552,9 +547,36 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Sidebar: Activity Feed (1/3 width) */}
-          <div className="space-y-4">
-            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] sticky top-8">
+          {/* Sidebar: Online + Activity Feed (1/3 width) */}
+          <div className="space-y-4 sticky top-8">
+            {/* Online Users */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse" />
+                <h3 className="text-sm font-medium text-[var(--text-secondary)]">Online Now</h3>
+              </div>
+              {presenceUsers.length === 0 ? (
+                <p className="text-xs text-[var(--text-tertiary)] py-2">No team members online</p>
+              ) : (
+                <div className="space-y-2">
+                  {presenceUsers.map((user) => (
+                    <div key={user.username} className="flex items-center gap-2.5">
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                        style={{ backgroundColor: user.color || "#5c7cfa" }}
+                      >
+                        {user.username.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-xs text-[var(--text-primary)] font-medium truncate">{user.username}</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] flex-shrink-0 ml-auto" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Activity Feed */}
+            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
               <ActivityFeed events={activityEvents} maxItems={15} />
             </div>
           </div>

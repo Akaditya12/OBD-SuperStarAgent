@@ -26,17 +26,17 @@ const EVENT_CONFIG: Record<
     },
     comment_added: {
         icon: <MessageCircle className="w-3.5 h-3.5" />,
-        color: "text-brand-400",
+        color: "text-[var(--accent)]",
         label: "commented",
     },
     user_joined: {
         icon: <UserPlus className="w-3.5 h-3.5" />,
-        color: "text-emerald-400",
+        color: "text-[var(--success)]",
         label: "came online",
     },
     user_left: {
         icon: <UserMinus className="w-3.5 h-3.5" />,
-        color: "text-gray-500",
+        color: "text-[var(--text-tertiary)]",
         label: "went offline",
     },
 };
@@ -89,21 +89,21 @@ export default function ActivityFeed({
     return (
         <div>
             <div className="flex items-center gap-2 mb-4">
-                <Activity className="w-4 h-4 text-brand-400" />
-                <h3 className="text-sm font-medium text-gray-300">Activity</h3>
+                <Activity className="w-4 h-4 text-[var(--accent)]" />
+                <h3 className="text-sm font-medium text-[var(--text-secondary)]">Activity</h3>
             </div>
 
             {loading ? (
                 <div className="space-y-3">
                     {[1, 2, 3].map((i) => (
                         <div key={i} className="flex items-center gap-3 animate-pulse">
-                            <div className="w-6 h-6 rounded-full bg-gray-800" />
-                            <div className="flex-1 h-3 rounded bg-gray-800" />
+                            <div className="w-6 h-6 rounded-full bg-[var(--input-bg)]" />
+                            <div className="flex-1 h-3 rounded bg-[var(--input-bg)]" />
                         </div>
                     ))}
                 </div>
             ) : displayEvents.length === 0 ? (
-                <p className="text-xs text-gray-600 text-center py-6">
+                <p className="text-xs text-[var(--text-tertiary)] text-center py-6">
                     No activity yet
                 </p>
             ) : (
@@ -111,13 +111,13 @@ export default function ActivityFeed({
                     {displayEvents.map((event) => {
                         const config = EVENT_CONFIG[event.type] || {
                             icon: <Activity className="w-3.5 h-3.5" />,
-                            color: "text-gray-500",
+                            color: "text-[var(--text-tertiary)]",
                             label: event.type,
                         };
                         return (
                             <div
                                 key={event.id}
-                                className="flex items-start gap-2.5 py-2 px-2 rounded-lg hover:bg-white/[0.02] transition-colors animate-fade-in"
+                                className="flex items-start gap-2.5 py-2 px-2 rounded-lg hover:bg-[var(--accent-subtle)]/30 transition-colors animate-fade-in"
                             >
                                 <div
                                     className={`flex-shrink-0 mt-0.5 ${config.color}`}
@@ -125,27 +125,27 @@ export default function ActivityFeed({
                                     {config.icon}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs text-gray-400">
-                                        <span className="font-medium text-gray-300">
+                                    <p className="text-xs text-[var(--text-tertiary)]">
+                                        <span className="font-medium text-[var(--text-secondary)]">
                                             {event.username}
                                         </span>{" "}
                                         {config.label}
                                         {event.campaign_name && (
                                             <>
                                                 {" on "}
-                                                <span className="font-medium text-gray-300">
+                                                <span className="font-medium text-[var(--text-secondary)]">
                                                     {event.campaign_name}
                                                 </span>
                                             </>
                                         )}
                                     </p>
                                     {event.detail && (
-                                        <p className="text-[10px] text-gray-600 mt-0.5 truncate">
+                                        <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5 truncate">
                                             &ldquo;{event.detail}&rdquo;
                                         </p>
                                     )}
                                 </div>
-                                <span className="text-[10px] text-gray-600 flex-shrink-0 mt-0.5">
+                                <span className="text-[10px] text-[var(--text-tertiary)] flex-shrink-0 mt-0.5">
                                     {timeAgo(event.timestamp)}
                                 </span>
                             </div>
