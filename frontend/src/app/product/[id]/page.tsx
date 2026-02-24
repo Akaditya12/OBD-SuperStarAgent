@@ -4,7 +4,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
-  ArrowRight,
   Sparkles,
   Radio,
   Shield,
@@ -163,15 +162,6 @@ export default function ProductDetailPage() {
               <h1 className="text-2xl font-bold text-[var(--text-primary)]">{product.name}</h1>
               <p className="text-sm text-[var(--text-tertiary)] mt-1">{product.shortDesc}</p>
             </div>
-            {productId !== "smartconnect" && (
-              <button
-                onClick={() => router.push(`/?product=${productId}`)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
-              >
-                <Zap className="w-4 h-4" />
-                Create Campaign
-              </button>
-            )}
           </div>
 
           {overview && (
@@ -255,20 +245,6 @@ export default function ProductDetailPage() {
           </div>
         )}
 
-        {/* CTA */}
-        {productId !== "smartconnect" && (
-          <div className="text-center py-4">
-            <button
-              onClick={() => router.push(`/?product=${productId}`)}
-              className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl text-white font-medium hover:opacity-90 transition-opacity glow-brand"
-              style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}
-            >
-              <Zap className="w-5 h-5" />
-              Create OBD Campaign for {product.name}
-              <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
