@@ -164,13 +164,13 @@ export default function ProductDetailPage() {
               <p className="text-sm text-[var(--text-tertiary)] mt-1">{product.shortDesc}</p>
             </div>
             {productId !== "smartconnect" && (
-              <Link
-                href={`/?product=${productId}`}
+              <button
+                onClick={() => router.push(`/?product=${productId}`)}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
               >
+                <Zap className="w-4 h-4" />
                 Create Campaign
-                <ArrowRight className="w-4 h-4" />
-              </Link>
+              </button>
             )}
           </div>
 
@@ -258,13 +258,15 @@ export default function ProductDetailPage() {
         {/* CTA */}
         {productId !== "smartconnect" && (
           <div className="text-center py-4">
-            <Link
-              href={`/?product=${productId}`}
-              className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl bg-[var(--accent)] text-white font-medium hover:opacity-90 transition-opacity"
+            <button
+              onClick={() => router.push(`/?product=${productId}`)}
+              className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl text-white font-medium hover:opacity-90 transition-opacity glow-brand"
+              style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}
             >
+              <Zap className="w-5 h-5" />
               Create OBD Campaign for {product.name}
               <ArrowRight className="w-5 h-5" />
-            </Link>
+            </button>
           </div>
         )}
       </div>
