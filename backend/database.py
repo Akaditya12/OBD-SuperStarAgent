@@ -376,15 +376,20 @@ def get_pipeline_config() -> dict[str, Any]:
 
 
 def save_pipeline_config(updates: dict[str, Any], updated_by: str = "admin") -> dict[str, Any]:
-    """Upsert one or more pipeline config keys."""
-    if supabase:
-        for key, value in updates.items():
-            try:
-                supabase.table("app_config").upsert({
-                    "key": key,
-                    "value": value,
-                    "updated_by": updated_by,
-                }).execute()
-            except Exception as e:
-                logger.warning("Failed to save config key '%s': %s", key, e)
+    """Upsert one or more pipeline config keys. Raises on failure."""
+    if not supabase:
+        raise RuntimeError("Supabase not configured")
+    errors: list[str] = []
+    for key, value in updates.items():
+        try:
+            supabase.table("app_config").upsert({
+                "key": key,
+                "value": value,
+                "updated_by": updated_by,
+            }).execute()
+        except Exception as e:
+            logger.error("Failed to save config key '%s': %s", key, e)
+            errors.append(f"{key}: {e}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
     return get_pipeline_config()

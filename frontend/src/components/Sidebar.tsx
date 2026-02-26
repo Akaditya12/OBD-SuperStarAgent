@@ -9,6 +9,7 @@ import {
     LayoutDashboard,
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
     Menu,
     X,
     Sparkles,
@@ -16,14 +17,23 @@ import {
     Shield,
     Mic2,
     Phone,
+    Plane,
+    Gamepad2,
+    BookOpen,
+    Moon,
+    Cross,
+    GraduationCap,
     LogOut,
     User,
+    AudioLines,
+    Package,
 } from "lucide-react";
 import ThemePicker from "./ThemePicker";
 import BNGLogo from "./BNGLogo";
 
 const NAV_ITEMS = [
     { href: "/", label: "Home", icon: Home },
+    { href: "/script-to-voice", label: "Script to Voice", icon: AudioLines },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
 
@@ -33,8 +43,14 @@ const BNG_PRODUCT_LIST = [
     { id: "eva", label: "EVA", icon: Sparkles },
     { id: "smartconnect", label: "SmartConnect AI", icon: Radio },
     { id: "callsignature", label: "Call Signature", icon: Shield },
-    { id: "magicvoice", label: "Magic Voice IVR", icon: Mic2 },
+    { id: "magicvoice", label: "Magic Voice", icon: Mic2 },
     { id: "magiccall", label: "Magic Call App", icon: Phone },
+    { id: "dreamtravel", label: "DreamTravel", icon: Plane },
+    { id: "mobibattle", label: "MobiBattle", icon: Gamepad2 },
+    { id: "swipenwin", label: "SwipeNWin", icon: BookOpen },
+    { id: "islamicportal", label: "Islamic Portal", icon: Moon },
+    { id: "christianity", label: "Christianity Portal", icon: Cross },
+    { id: "learnenglish", label: "Learn English", icon: GraduationCap },
 ];
 
 export default function Sidebar() {
@@ -44,6 +60,13 @@ export default function Sidebar() {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
     const [userName, setUserName] = useState<string | null>(null);
+
+    const isOnProductPage = pathname.startsWith("/product/");
+    const [productsOpen, setProductsOpen] = useState(isOnProductPage);
+
+    useEffect(() => {
+        if (pathname.startsWith("/product/")) setProductsOpen(true);
+    }, [pathname]);
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -145,38 +168,61 @@ export default function Sidebar() {
                 )}
             </nav>
 
-            {/* BNG Products */}
+            {/* BNG Products -- collapsible */}
             <div className="flex-1 px-3 pb-2 overflow-y-auto">
-                {!collapsed && (
-                    <p className="px-3 mb-2 text-[9px] uppercase tracking-widest font-semibold text-[var(--text-tertiary)]">
-                        BNG Products
-                    </p>
-                )}
-                <div className="space-y-0.5">
-                    {BNG_PRODUCT_LIST.map((product) => {
-                        const Icon = product.icon;
-                        const isProductActive = pathname === `/product/${product.id}`;
-                        return (
-                            <Link
-                                key={product.id}
-                                href={`/product/${product.id}`}
-                                onClick={() => setMobileOpen(false)}
-                                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-200 group ${isProductActive
-                                        ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
-                                        : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)]"
-                                    }`}
-                            >
-                                <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isProductActive
-                                        ? "text-[var(--accent)]"
-                                        : "text-[var(--text-tertiary)] group-hover:text-[var(--accent)]"
-                                    }`} />
-                                {!collapsed && (
-                                    <span className="animate-fade-in truncate">{product.label}</span>
+                {!collapsed ? (
+                    <>
+                        <button
+                            onClick={() => setProductsOpen((v) => !v)}
+                            className="w-full flex items-center justify-between px-3 mb-1 group cursor-pointer"
+                        >
+                            <span className="flex items-center gap-2 text-[9px] uppercase tracking-widest font-semibold text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] transition-colors">
+                                <Package className="w-3 h-3" />
+                                BNG Products
+                                {isOnProductPage && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
                                 )}
-                            </Link>
-                        );
-                    })}
-                </div>
+                            </span>
+                            <ChevronDown
+                                className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform duration-200 ${productsOpen ? "rotate-180" : ""}`}
+                            />
+                        </button>
+
+                        <div
+                            className={`space-y-0.5 overflow-hidden transition-all duration-300 ease-in-out ${productsOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"}`}
+                        >
+                            {BNG_PRODUCT_LIST.map((product) => {
+                                const Icon = product.icon;
+                                const isProductActive = pathname === `/product/${product.id}`;
+                                return (
+                                    <Link
+                                        key={product.id}
+                                        href={`/product/${product.id}`}
+                                        onClick={() => setMobileOpen(false)}
+                                        className={`flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 group ${isProductActive
+                                            ? "bg-[var(--accent-subtle)] text-[var(--accent)]"
+                                            : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent-subtle)]"
+                                            }`}
+                                    >
+                                        <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isProductActive
+                                            ? "text-[var(--accent)]"
+                                            : "text-[var(--text-tertiary)] group-hover:text-[var(--accent)]"
+                                            }`} />
+                                        <span className="animate-fade-in truncate">{product.label}</span>
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    </>
+                ) : (
+                    <button
+                        onClick={() => { setCollapsed(false); setProductsOpen(true); }}
+                        title="BNG Products"
+                        className="w-full flex items-center justify-center py-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
+                    >
+                        <Package className="w-4 h-4" />
+                    </button>
+                )}
             </div>
 
             {/* User info + Logout */}

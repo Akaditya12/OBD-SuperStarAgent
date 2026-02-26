@@ -16,6 +16,12 @@ import {
   CheckCircle2,
   Globe,
   TrendingUp,
+  Plane,
+  Gamepad2,
+  BookOpen,
+  Moon,
+  Cross,
+  GraduationCap,
 } from "lucide-react";
 import { BNG_PRODUCTS } from "@/components/ProductPresets";
 
@@ -25,6 +31,12 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   callsignature: <Shield className="w-6 h-6" />,
   magicvoice: <Mic2 className="w-6 h-6" />,
   magiccall: <Phone className="w-6 h-6" />,
+  dreamtravel: <Plane className="w-6 h-6" />,
+  mobibattle: <Gamepad2 className="w-6 h-6" />,
+  swipenwin: <BookOpen className="w-6 h-6" />,
+  islamicportal: <Moon className="w-6 h-6" />,
+  christianity: <Cross className="w-6 h-6" />,
+  learnenglish: <GraduationCap className="w-6 h-6" />,
   custom: <Package className="w-6 h-6" />,
 };
 
@@ -57,11 +69,11 @@ const PRODUCT_FLOWS: Record<string, FlowStep[]> = {
     { step: 5, title: "Higher Conversion", description: "Engaged customers convert at 4x the rate of unknown calls" },
   ],
   magicvoice: [
-    { step: 1, title: "User Dials Short Code", description: "Subscriber calls the IVR service number" },
-    { step: 2, title: "Dynamic IVR Menu", description: "Engaging voice menu with entertainment/info options" },
-    { step: 3, title: "DTMF Navigation", description: "User navigates using keypad (works on any phone)" },
-    { step: 4, title: "Content Delivered", description: "Jokes, stories, music, news, horoscopes via voice" },
-    { step: 5, title: "Subscription Prompt", description: "Natural break points offer premium subscription" },
+    { step: 1, title: "User Dials Short Code", description: "Subscriber dials short-code followed by the mobile number to call" },
+    { step: 2, title: "Select Voice Avatar", description: "Choose from Female, Kid, Celebrity, Cartoon voice avatars" },
+    { step: 3, title: "Select Ambience (Optional)", description: "Add background effects: Concert, Airport, Traffic, James Bond" },
+    { step: 4, title: "Call Connected", description: "Call connected to B-party with the chosen voice or ambience applied in real-time" },
+    { step: 5, title: "Fun Conversation", description: "Enjoy a fun, personalized calling experience" },
   ],
   magiccall: [
     { step: 1, title: "Download App", description: "User installs Magic Call from Play Store / App Store" },
@@ -69,6 +81,48 @@ const PRODUCT_FLOWS: Record<string, FlowStep[]> = {
     { step: 3, title: "Make a Call", description: "Dial any number through the app" },
     { step: 4, title: "Real-time Voice Change", description: "Voice is transformed live during the call" },
     { step: 5, title: "Share & Go Viral", description: "Users share experiences, driving organic growth" },
+  ],
+  dreamtravel: [
+    { step: 1, title: "Subscribe & Join", description: "Customer opts in through SMS, IVR, or website" },
+    { step: 2, title: "Answer Quizzes", description: "Fun, interactive quizzes related to travel or brand themes" },
+    { step: 3, title: "Earn Points & Level Up", description: "Gamification drives frequent use and unlocks new levels" },
+    { step: 4, title: "Win a Prize", description: "Chance to win a dream vacation, discounts, or telco offers" },
+    { step: 5, title: "Redeem the Trip", description: "Winners receive an all-expenses-paid trip to a dream destination with a plus-one" },
+  ],
+  mobibattle: [
+    { step: 1, title: "Select a Game", description: "User picks from 50+ casual games or e-sports tournaments" },
+    { step: 2, title: "Play Free or With Coins", description: "Play free games or use MobiBattle coins/credits" },
+    { step: 3, title: "Matched with Opponent", description: "Recommendation system finds a live player to compete against" },
+    { step: 4, title: "Compete in Real-Time", description: "2-4 player casual games or 100-500 player e-sports tournaments" },
+    { step: 5, title: "Win Rewards", description: "Data packs, airtime, and prizes based on leaderboard rankings" },
+  ],
+  swipenwin: [
+    { step: 1, title: "Open SwipeNWin", description: "Access via web or mobile — subscribe to start quizzing" },
+    { step: 2, title: "Choose Quiz Type", description: "Moment Quiz (trending), Category Quiz (MCQ), or Swipe Quiz (T/F)" },
+    { step: 3, title: "Answer Questions", description: "Test knowledge across 10,000+ questions in multiple categories" },
+    { step: 4, title: "Climb the Leaderboard", description: "Enhanced leaderboard ranks users on overall performance" },
+    { step: 5, title: "Win Prizes", description: "Daily, weekly, and monthly prizes — buy more chances anytime" },
+  ],
+  islamicportal: [
+    { step: 1, title: "Subscribe via IVR/App/SMS", description: "User subscribes through any available channel" },
+    { step: 2, title: "Access Holy Quran", description: "Listen to or read the Holy Quran in regional languages" },
+    { step: 3, title: "Duas & Nasheeds", description: "40 powerful Rabbanas/Duas, soothing Nasheeds, 99 Names of Allah" },
+    { step: 4, title: "Salat Alerts", description: "Receive prayer reminders 5 times a day, find nearby mosques" },
+    { step: 5, title: "Daily Islamic Content", description: "Quran verses, Islamic facts, daily Hadith via SMS" },
+  ],
+  christianity: [
+    { step: 1, title: "Subscribe on Web/USSD", description: "User subscribes via web (Header Enrichment) or USSD code" },
+    { step: 2, title: "Download the App", description: "Receive confirmation SMS with app download link" },
+    { step: 3, title: "Daily Verse & Stories", description: "Access daily Bible verses, Biblical stories, and daily feed" },
+    { step: 4, title: "Audio Bible & Books", description: "Listen to Audio Bible and 1000+ audiobooks across 50+ categories" },
+    { step: 5, title: "Live Prayer & Gospel", description: "Exclusive live prayer streaming, gospel songs, morning/evening glory" },
+  ],
+  learnenglish: [
+    { step: 1, title: "Subscribe via IVR/Web", description: "User subscribes through IVR short code or web platform" },
+    { step: 2, title: "Access Learning Modules", description: "Structured English learning modules at different levels" },
+    { step: 3, title: "Interactive Quizzes", description: "Fill-in-the-blank quizzes and trivia to test knowledge" },
+    { step: 4, title: "SMS Dictionary", description: "Learn new words and phrases via SMS-driven content" },
+    { step: 5, title: "Track Progress", description: "Monitor improvement and engage with new content daily" },
   ],
 };
 
@@ -92,16 +146,52 @@ const PRODUCT_STATS: Record<string, { label: string; value: string; icon: React.
     { label: "Phone Support", value: "All types", icon: <Phone className="w-4 h-4" /> },
   ],
   magicvoice: [
-    { label: "Transactions/mo", value: "1B+", icon: <TrendingUp className="w-4 h-4" /> },
-    { label: "Countries", value: "100+", icon: <Globe className="w-4 h-4" /> },
-    { label: "Active Users", value: "290M+", icon: <Users className="w-4 h-4" /> },
-    { label: "Track Record", value: "15+ years", icon: <Zap className="w-4 h-4" /> },
+    { label: "Voice Avatars", value: "4+", icon: <Mic2 className="w-4 h-4" /> },
+    { label: "Ambiences", value: "4+", icon: <Globe className="w-4 h-4" /> },
+    { label: "Channels", value: "IVR + App", icon: <Phone className="w-4 h-4" /> },
+    { label: "Go Live", value: "3 weeks", icon: <Zap className="w-4 h-4" /> },
   ],
   magiccall: [
     { label: "Downloads", value: "20M+", icon: <TrendingUp className="w-4 h-4" /> },
     { label: "Platforms", value: "Android + iOS", icon: <Phone className="w-4 h-4" /> },
     { label: "Growth", value: "Viral", icon: <Zap className="w-4 h-4" /> },
     { label: "Model", value: "Freemium", icon: <DollarSign className="w-4 h-4" /> },
+  ],
+  dreamtravel: [
+    { label: "Telco Partners", value: "160+", icon: <Globe className="w-4 h-4" /> },
+    { label: "Countries", value: "90+", icon: <Globe className="w-4 h-4" /> },
+    { label: "Monthly Users", value: "290M+", icon: <Users className="w-4 h-4" /> },
+    { label: "Deploy Time", value: "6 weeks", icon: <Zap className="w-4 h-4" /> },
+  ],
+  mobibattle: [
+    { label: "Casual Games", value: "50+", icon: <Gamepad2 className="w-4 h-4" /> },
+    { label: "Gaming Revenue", value: "$188.6B", icon: <DollarSign className="w-4 h-4" /> },
+    { label: "Engagement", value: "+81%", icon: <TrendingUp className="w-4 h-4" /> },
+    { label: "Go Live", value: "4 weeks", icon: <Zap className="w-4 h-4" /> },
+  ],
+  swipenwin: [
+    { label: "Questions", value: "10,000+", icon: <BookOpen className="w-4 h-4" /> },
+    { label: "Quiz Types", value: "3", icon: <Zap className="w-4 h-4" /> },
+    { label: "Partners", value: "108+", icon: <Globe className="w-4 h-4" /> },
+    { label: "Countries", value: "80+", icon: <Globe className="w-4 h-4" /> },
+  ],
+  islamicportal: [
+    { label: "Subscribers", value: "42M+", icon: <Users className="w-4 h-4" /> },
+    { label: "Countries", value: "32+", icon: <Globe className="w-4 h-4" /> },
+    { label: "Channels", value: "IVR/App/WAP/SMS", icon: <Phone className="w-4 h-4" /> },
+    { label: "Audience", value: "1.6B+", icon: <TrendingUp className="w-4 h-4" /> },
+  ],
+  christianity: [
+    { label: "Subscribers", value: "42M+", icon: <Users className="w-4 h-4" /> },
+    { label: "Countries", value: "32+", icon: <Globe className="w-4 h-4" /> },
+    { label: "Audiobooks", value: "1000+", icon: <BookOpen className="w-4 h-4" /> },
+    { label: "Categories", value: "50+", icon: <Zap className="w-4 h-4" /> },
+  ],
+  learnenglish: [
+    { label: "Channels", value: "IVR + Web", icon: <Phone className="w-4 h-4" /> },
+    { label: "Content", value: "SMS + Quiz", icon: <BookOpen className="w-4 h-4" /> },
+    { label: "Engagement", value: "Daily", icon: <TrendingUp className="w-4 h-4" /> },
+    { label: "Market", value: "Emerging", icon: <Globe className="w-4 h-4" /> },
   ],
 };
 
@@ -135,7 +225,9 @@ export default function ProductDetailPage() {
   const featureList = features
     ? features.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.replace("- ", ""))
     : [];
-  const valuePropSection = descSections.find((s) => s.includes("Value Proposition for Subscribers:") || s.includes("Value Proposition:"));
+  const valuePropSection = descSections.find(
+    (s) => s.includes("Value Proposition for Subscribers:") || s.includes("Value Proposition:") || s.includes("Value for Telcos:") || s.includes("Benefits for Telcos:") || s.includes("What's In It for Operators:")
+  );
   const valueProps = valuePropSection
     ? valuePropSection.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.replace("- ", ""))
     : [];

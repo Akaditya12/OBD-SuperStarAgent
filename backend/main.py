@@ -480,8 +480,11 @@ async def update_config(request: Request):
     body = await request.json()
     user = getattr(request.state, "user", {})
     updated_by = user.get("username", "admin") if isinstance(user, dict) else "admin"
-    config = save_pipeline_config(body, updated_by=updated_by)
-    return config
+    try:
+        config = save_pipeline_config(body, updated_by=updated_by)
+        return config
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/api/admin/agents")
@@ -531,12 +534,15 @@ async def update_agent_prompt(agent_key: str, request: Request):
         if _sb:
             try:
                 _sb.table("app_config").delete().eq("key", db_key).execute()
-            except Exception:
-                pass
+            except Exception as e:
+                return JSONResponse(status_code=500, content={"error": str(e)})
         return {"status": "reset", "agent": agent_key}
 
-    save_pipeline_config({db_key: prompt}, updated_by=updated_by)
-    return {"status": "saved", "agent": agent_key}
+    try:
+        save_pipeline_config({db_key: prompt}, updated_by=updated_by)
+        return {"status": "saved", "agent": agent_key}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 _AGENT_LABELS = {
@@ -1577,3 +1583,183 @@ def _make_serializable(obj: Any) -> Any:
         return obj
     else:
         return str(obj)
+
+
+# ── Script-to-Voice Endpoints ──────────────────────────────────────────
+
+_stv_jobs: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/script-to-voice/preview")
+async def stv_preview(request: Request):
+    """Generate 3 voice previews for a user-supplied script.
+
+    Expects: { script_text, country?, language?, tts_engine? }
+    Returns: { job_id, session_id, status: "accepted" }
+    """
+    body = await request.json()
+    script_text = (body.get("script_text") or "").strip()
+    if not script_text:
+        return JSONResponse(status_code=400, content={"error": "script_text is required"})
+
+    country = body.get("country", "")
+    language = body.get("language") or None
+    tts_engine = body.get("tts_engine") or None
+
+    session_id = uuid.uuid4().hex[:8]
+    job_id = uuid.uuid4().hex[:12]
+    _stv_jobs[job_id] = {"status": "running", "session_id": session_id}
+
+    fake_scripts: dict[str, Any] = {
+        "scripts": [{
+            "variant_id": 1,
+            "theme": "Script to Voice",
+            "hook": script_text[:300],
+            "full_script": script_text,
+        }],
+    }
+
+    voice_selection: dict[str, Any] = {
+        "selected_voice": {"voice_id": "", "name": "auto"},
+        "voice_settings": {},
+    }
+
+    async def _run():
+        from backend.agents import AudioProducerAgent
+        producer = AudioProducerAgent()
+        try:
+            preview_result = await producer.run_hook_previews(
+                scripts=fake_scripts,
+                voice_selection=voice_selection,
+                session_id=session_id,
+                country=country,
+                language=language,
+                tts_engine_override=tts_engine,
+            )
+            sessions[session_id] = {
+                "session_id": session_id,
+                "hook_previews": preview_result,
+                "voice_selection": voice_selection,
+                "stv_scripts": fake_scripts,
+                "country": country,
+                "language": language,
+                "tts_engine_choice": tts_engine,
+            }
+            _stv_jobs[job_id] = {
+                "status": "done",
+                "session_id": session_id,
+                "previews": _make_serializable(preview_result),
+            }
+        except Exception as e:
+            logger.error(f"Script-to-voice preview failed: {e}")
+            _stv_jobs[job_id] = {"status": "error", "session_id": session_id, "error": str(e)}
+
+    asyncio.create_task(_run())
+    return {"status": "accepted", "job_id": job_id, "session_id": session_id}
+
+
+@app.get("/api/script-to-voice/jobs/{job_id}")
+async def stv_job_status(job_id: str):
+    """Poll for script-to-voice job completion."""
+    job = _stv_jobs.get(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    return _make_serializable(job)
+
+
+@app.post("/api/script-to-voice/upload-bgm")
+async def stv_upload_bgm(bgm_file: UploadFile = File(...)):
+    """Upload a custom BGM file. Returns a bgm_id for use in generation."""
+    bgm_id = uuid.uuid4().hex[:12]
+    bgm_dir = OUTPUTS_DIR / "_custom_bgm"
+    bgm_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(bgm_file.filename or "bgm.mp3").suffix or ".mp3"
+    bgm_path = bgm_dir / f"{bgm_id}{ext}"
+    content = await bgm_file.read()
+    bgm_path.write_bytes(content)
+    logger.info(f"Custom BGM uploaded: {bgm_path} ({len(content)} bytes)")
+    return {"bgm_id": bgm_id, "filename": bgm_file.filename, "size": len(content)}
+
+
+@app.post("/api/script-to-voice/generate")
+async def stv_generate(request: Request):
+    """Generate final audio with chosen voice, BGM, and format.
+
+    Expects: { session_id, script_text, voice_choice, country?,
+               language?, bgm_style?, audio_format?, tts_engine?, bgm_id? }
+    """
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    script_text = (body.get("script_text") or "").strip()
+    voice_choice = body.get("voice_choice", 0)
+    bgm_style = body.get("bgm_style", "upbeat")
+    audio_format = body.get("audio_format", "mp3")
+    country = body.get("country", "")
+    language = body.get("language") or None
+    tts_engine = body.get("tts_engine") or None
+    bgm_id = body.get("bgm_id") or None
+
+    if not script_text:
+        return JSONResponse(status_code=400, content={"error": "script_text is required"})
+
+    if not session_id:
+        session_id = uuid.uuid4().hex[:8]
+
+    full_scripts: dict[str, Any] = {
+        "scripts": [{
+            "variant_id": 1,
+            "theme": "Script to Voice",
+            "hook": script_text[:300],
+            "full_script": script_text,
+        }],
+    }
+
+    existing = sessions.get(session_id) or {}
+    voice_selection = existing.get("voice_selection") or {
+        "selected_voice": {"voice_id": "", "name": "auto"},
+        "voice_settings": {},
+    }
+
+    voice_choices = {1: int(voice_choice)}
+
+    job_id = uuid.uuid4().hex[:12]
+    _stv_jobs[job_id] = {"status": "running", "session_id": session_id}
+
+    custom_bgm_file = None
+    if bgm_id:
+        bgm_dir = OUTPUTS_DIR / "_custom_bgm"
+        candidates = list(bgm_dir.glob(f"{bgm_id}.*")) if bgm_dir.exists() else []
+        if candidates:
+            custom_bgm_file = str(candidates[0])
+
+    async def _run():
+        from backend.agents import AudioProducerAgent
+        producer = AudioProducerAgent()
+        try:
+            audio_result = await producer.run_final_audio(
+                scripts=full_scripts,
+                voice_selection=voice_selection,
+                voice_choices=voice_choices,
+                session_id=session_id,
+                country=country,
+                language=language,
+                tts_engine_override=tts_engine,
+                bgm_style=bgm_style,
+                audio_format=audio_format,
+                custom_bgm_path=custom_bgm_file,
+            )
+            if session_id in sessions:
+                sessions[session_id]["audio"] = audio_result
+            else:
+                sessions[session_id] = {"audio": audio_result, "session_id": session_id}
+            _stv_jobs[job_id] = {
+                "status": "done",
+                "session_id": session_id,
+                "audio": _make_serializable(audio_result),
+            }
+        except Exception as e:
+            logger.error(f"Script-to-voice generation failed: {e}")
+            _stv_jobs[job_id] = {"status": "error", "session_id": session_id, "error": str(e)}
+
+    asyncio.create_task(_run())
+    return {"status": "accepted", "job_id": job_id, "session_id": session_id}

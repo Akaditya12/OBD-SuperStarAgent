@@ -22,6 +22,7 @@ interface PipelineConfig {
     max_script_words: number;
     num_script_variants: number;
     eval_feedback_rounds: number;
+    num_hook_voices: number;
     elevenlabs_tts_model: string;
     elevenlabs_output_format: string;
     voice_stability: number;
@@ -36,6 +37,7 @@ const DEFAULTS: PipelineConfig = {
     max_script_words: 75,
     num_script_variants: 5,
     eval_feedback_rounds: 1,
+    num_hook_voices: 3,
     elevenlabs_tts_model: "eleven_multilingual_v2",
     elevenlabs_output_format: "mp3_44100_192",
     voice_stability: 0.35,
@@ -136,10 +138,13 @@ export default function AdminPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ prompt: editedPrompts[agentKey] || "" }),
             });
-            if (!res.ok) throw new Error("Failed to save");
-            setAgentMsg({ [agentKey]: "Saved" });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            setAgentMsg({ [agentKey]: "Saved successfully" });
             fetchAgents();
-            setTimeout(() => setAgentMsg({}), 3000);
+            setTimeout(() => setAgentMsg({}), 4000);
         } catch (err: any) { setAgentMsg({ [agentKey]: `Error: ${err.message}` }); }
         finally { setSavingAgent(null); }
     };
@@ -434,7 +439,7 @@ export default function AdminPage() {
                                     <Mic2 className="w-5 h-5 text-[var(--accent)]" />
                                     <h2 className="text-base font-semibold">Voice &amp; TTS Engine</h2>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <div>
                                         <label className={labelCls}>Default TTS Engine</label>
                                         <div className="flex gap-2">
@@ -451,6 +456,17 @@ export default function AdminPage() {
                                             <option value="eleven_multilingual_v2">Multilingual V2 (recommended)</option>
                                             <option value="eleven_turbo_v2_5">Turbo V2.5 (faster)</option>
                                         </select>
+                                    </div>
+                                    <div>
+                                        <label className={labelCls}>Voice Options per Variant</label>
+                                        <div className="flex gap-2">
+                                            {[2, 3, 4].map((n) => (
+                                                <button key={n} type="button" onClick={() => updateConfig("num_hook_voices", n)} className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all ${config.num_hook_voices === n ? "border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]" : "border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--card-border-hover)]"}`}>
+                                                    {n}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Number of voice previews to generate</p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
@@ -598,13 +614,19 @@ export default function AdminPage() {
                                                     </span>
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    {agent.is_customized && (
+                                                    {(agent.is_customized || currentPrompt !== agent.default_prompt) && (
                                                         <button
-                                                            onClick={() => resetAgentPrompt(agent.key)}
+                                                            onClick={() => {
+                                                                if (agent.is_customized) {
+                                                                    resetAgentPrompt(agent.key);
+                                                                } else {
+                                                                    setEditedPrompts((prev) => ({ ...prev, [agent.key]: agent.default_prompt }));
+                                                                }
+                                                            }}
                                                             disabled={savingAgent === agent.key}
                                                             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card-border)] transition-colors disabled:opacity-40"
                                                         >
-                                                            <Undo2 className="w-3.5 h-3.5" /> Reset to Default
+                                                            <Undo2 className="w-3.5 h-3.5" /> {agent.is_customized ? "Reset to Default" : "Undo Changes"}
                                                         </button>
                                                     )}
                                                     <button

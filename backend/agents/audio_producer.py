@@ -676,17 +676,36 @@ BGM_GENERATORS = {
 }
 
 
-def _mix_voice_with_music(voice_path: Path, output_path: Path, bgm_style: str = "upbeat") -> None:
+def _mix_voice_with_music(
+    voice_path: Path,
+    output_path: Path,
+    bgm_style: str = "upbeat",
+    custom_bgm_path: Path | None = None,
+) -> None:
     """Mix voice with background music, matching reference quality."""
     try:
         from pydub import AudioSegment
 
         voice = AudioSegment.from_mp3(str(voice_path))
 
-        music_gen = BGM_GENERATORS.get(bgm_style, _generate_upbeat_music)
-        music_duration = len(voice) + 2500
-        music_wav = music_gen(music_duration)
-        music = AudioSegment.from_wav(io.BytesIO(music_wav))
+        if custom_bgm_path and custom_bgm_path.exists():
+            ext = custom_bgm_path.suffix.lower()
+            if ext == ".wav":
+                music = AudioSegment.from_wav(str(custom_bgm_path))
+            elif ext in (".mp3",):
+                music = AudioSegment.from_mp3(str(custom_bgm_path))
+            else:
+                music = AudioSegment.from_file(str(custom_bgm_path))
+            music_duration = len(voice) + 2500
+            if len(music) < music_duration:
+                loops = (music_duration // len(music)) + 1
+                music = music * loops
+            music = music[:music_duration]
+        else:
+            music_gen = BGM_GENERATORS.get(bgm_style, _generate_upbeat_music)
+            music_duration = len(voice) + 2500
+            music_wav = music_gen(music_duration)
+            music = AudioSegment.from_wav(io.BytesIO(music_wav))
 
         # Music level: -26dB below voice (subtle but audible)
         music = music - 26
@@ -768,6 +787,7 @@ class AudioProducerAgent(BaseAgent):
         section_type: str = "main",
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
+        custom_bgm_path: Path | None = None,
     ) -> dict[str, Any]:
         """Generate audio using edge-tts with prosody and optional background music."""
         clean_text = _clean_text_for_tts(text)
@@ -787,7 +807,7 @@ class AudioProducerAgent(BaseAgent):
                 clean_text, voice, rate=prosody["rate"], pitch=prosody["pitch"]
             )
             await communicate.save(str(voice_only_path))
-            _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style)
+            _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
             voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
@@ -814,6 +834,7 @@ class AudioProducerAgent(BaseAgent):
         style: str = "Conversational",
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
+        custom_bgm_path: Path | None = None,
     ) -> dict[str, Any]:
         """Generate audio using Murf AI API with pronunciation dictionary."""
         clean_text = _clean_text_for_tts(text, apply_pronunciation_hacks=False)
@@ -875,7 +896,7 @@ class AudioProducerAgent(BaseAgent):
             else:
                 voice_only_path = output_path.with_suffix(".voice.mp3")
                 voice_only_path.write_bytes(audio_response.content)
-                _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style)
+                _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
                 voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
@@ -902,6 +923,7 @@ class AudioProducerAgent(BaseAgent):
         model_id: str | None = None,
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
+        custom_bgm_path: Path | None = None,
     ) -> dict[str, Any]:
         effective_model = model_id or ELEVENLABS_TTS_MODEL
         url = f"{ELEVENLABS_BASE_URL}/v1/text-to-speech/{voice_id}"
@@ -943,7 +965,7 @@ class AudioProducerAgent(BaseAgent):
             else:
                 voice_only_path = output_path.with_suffix(".voice.mp3")
                 voice_only_path.write_bytes(response.content)
-                _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style)
+                _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
                 voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
@@ -995,6 +1017,14 @@ class AudioProducerAgent(BaseAgent):
         Uses LLM-selected alternatives first, then fills from a curated
         list of known-good premium voices with gender diversity.
         """
+        if not primary_voice_id or not primary_voice_id.strip():
+            from backend.agents.voice_selector import _CURATED_ELEVENLABS_VOICES
+            if _CURATED_ELEVENLABS_VOICES:
+                fallback = _CURATED_ELEVENLABS_VOICES[0]
+                primary_voice_id = fallback["voice_id"]
+                primary_name = f"{fallback['name']} (Auto)"
+                logger.info(f"[{self.name}] Empty primary voice_id; using curated fallback: {primary_name}")
+
         pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
         seen_ids = {primary_voice_id}
 
@@ -1157,6 +1187,9 @@ class AudioProducerAgent(BaseAgent):
         async def _tts_job(job: dict[str, Any]) -> dict[str, Any]:
             skip_bgm = job.get("skip_bgm", False)
             bgm_style = job.get("bgm_style", "upbeat")
+            custom_bgm = job.get("custom_bgm_path")
+            if custom_bgm and isinstance(custom_bgm, str):
+                custom_bgm = Path(custom_bgm)
             try:
                 if tts_engine == "murf":
                     result = await self._generate_murf_tts(
@@ -1167,6 +1200,7 @@ class AudioProducerAgent(BaseAgent):
                         style=job["murf_style"],
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
+                        custom_bgm_path=custom_bgm,
                     )
                 elif tts_engine == "elevenlabs":
                     result = await self._generate_elevenlabs(
@@ -1177,6 +1211,7 @@ class AudioProducerAgent(BaseAgent):
                         model_id=el_model_id,
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
+                        custom_bgm_path=custom_bgm,
                     )
                 else:
                     result = await self._generate_edge_tts(
@@ -1186,6 +1221,7 @@ class AudioProducerAgent(BaseAgent):
                         section_type=job["type"],
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
+                        custom_bgm_path=custom_bgm,
                     )
                 result["variant_id"] = job["variant_id"]
                 result["type"] = job["type"]
@@ -1388,6 +1424,7 @@ class AudioProducerAgent(BaseAgent):
         tts_engine_override: str | None = None,
         bgm_style: str = "upbeat",
         audio_format: str = "mp3",
+        custom_bgm_path: str | Path | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Generate full audio for all sections using the user-chosen voice per variant.
@@ -1419,6 +1456,8 @@ class AudioProducerAgent(BaseAgent):
             chosen_idx = voice_choices.get(variant_id, 1) - 1
             chosen_idx = max(0, min(chosen_idx, len(voice_pool) - 1))
 
+            no_bgm = bgm_style == "none"
+            resolved_bgm_path = Path(custom_bgm_path) if custom_bgm_path else None
             for field, audio_type in ALL_SECTIONS:
                 text = script.get(field, "")
                 if not text or not text.strip():
@@ -1430,8 +1469,9 @@ class AudioProducerAgent(BaseAgent):
                     "type": audio_type,
                     "theme": theme,
                     "voice_index": chosen_idx + 1,
-                    "skip_bgm": False,
-                    "bgm_style": bgm_style,
+                    "skip_bgm": no_bgm,
+                    "bgm_style": bgm_style if not no_bgm else "upbeat",
+                    "custom_bgm_path": str(resolved_bgm_path) if resolved_bgm_path else None,
                 }
                 job.update(voice_pool[chosen_idx])
                 jobs.append(job)
