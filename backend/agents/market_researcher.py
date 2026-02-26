@@ -113,7 +113,7 @@ Output only valid JSON.\
 """
 
         response = await self.call_llm(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=self._resolve_prompt(SYSTEM_PROMPT),
             user_prompt=user_prompt,
             max_tokens=4096,
         )

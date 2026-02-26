@@ -484,6 +484,80 @@ async def update_config(request: Request):
     return config
 
 
+@app.get("/api/admin/agents")
+async def get_agent_prompts():
+    """Return default + overridden system prompts for all agents."""
+    from backend.agents.product_analyzer import SYSTEM_PROMPT as PA_PROMPT
+    from backend.agents.market_researcher import SYSTEM_PROMPT as MR_PROMPT
+    from backend.agents.script_writer import SYSTEM_PROMPT as SW_PROMPT, REVISION_SYSTEM_PROMPT as SWR_PROMPT
+    from backend.agents.eval_panel import SYSTEM_PROMPT as EP_PROMPT
+    from backend.agents.voice_selector import SYSTEM_PROMPT as VS_PROMPT
+
+    defaults = {
+        "ProductAnalyzer": PA_PROMPT,
+        "MarketResearcher": MR_PROMPT,
+        "ScriptWriter": SW_PROMPT,
+        "ScriptWriter_Revision": SWR_PROMPT,
+        "EvalPanel": EP_PROMPT,
+        "VoiceSelector": VS_PROMPT,
+    }
+
+    cfg = get_pipeline_config()
+    agents = []
+    for key, default in defaults.items():
+        override = cfg.get(f"agent_prompt_{key}")
+        agents.append({
+            "key": key,
+            "label": _AGENT_LABELS.get(key, key),
+            "description": _AGENT_DESCRIPTIONS.get(key, ""),
+            "default_prompt": default,
+            "custom_prompt": override if isinstance(override, str) else "",
+            "is_customized": bool(override and isinstance(override, str) and override.strip()),
+        })
+    return {"agents": agents}
+
+
+@app.put("/api/admin/agents/{agent_key}")
+async def update_agent_prompt(agent_key: str, request: Request):
+    """Update or reset a single agent's system prompt."""
+    body = await request.json()
+    prompt = body.get("prompt", "")
+    user = getattr(request.state, "user", {})
+    updated_by = user.get("username", "admin") if isinstance(user, dict) else "admin"
+
+    db_key = f"agent_prompt_{agent_key}"
+    if not prompt or not prompt.strip():
+        from backend.database import supabase as _sb
+        if _sb:
+            try:
+                _sb.table("app_config").delete().eq("key", db_key).execute()
+            except Exception:
+                pass
+        return {"status": "reset", "agent": agent_key}
+
+    save_pipeline_config({db_key: prompt}, updated_by=updated_by)
+    return {"status": "saved", "agent": agent_key}
+
+
+_AGENT_LABELS = {
+    "ProductAnalyzer": "1. Product Analyzer",
+    "MarketResearcher": "2. Market Researcher",
+    "ScriptWriter": "3. Script Writer",
+    "EvalPanel": "4. Evaluation Panel",
+    "ScriptWriter_Revision": "5. Script Revision",
+    "VoiceSelector": "6. Voice Selector",
+}
+
+_AGENT_DESCRIPTIONS = {
+    "ProductAnalyzer": "Analyzes uploaded product documentation and extracts key features, benefits, and selling points.",
+    "MarketResearcher": "Researches the target country, telco operator, and market conditions for cultural and regulatory context.",
+    "ScriptWriter": "Generates OBD promotional scripts with hook, body, CTA, and fallback sections.",
+    "EvalPanel": "Panel of virtual experts that evaluates and scores generated scripts for quality and effectiveness.",
+    "ScriptWriter_Revision": "Revises scripts based on evaluation feedback to improve weak areas.",
+    "VoiceSelector": "Selects the optimal ElevenLabs voice and configures TTS parameters for the campaign.",
+}
+
+
 @app.on_event("startup")
 async def _on_startup():
     _cleanup_outputs(max_age_hours=24)

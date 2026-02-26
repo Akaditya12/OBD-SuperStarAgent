@@ -209,7 +209,7 @@ Under {max_words} words per script. Output valid JSON with "scripts" array of {c
 """
 
         response = await self.call_llm(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=self._resolve_prompt(SYSTEM_PROMPT),
             user_prompt=user_prompt,
             max_tokens=8192,
         )
@@ -333,7 +333,7 @@ Embed ElevenLabs V3 audio tags. Under {max_words} words per script. \
 Output valid JSON with "scripts" array of {count} objects.\
 """
             response = await self.call_llm(
-                system_prompt=REVISION_SYSTEM_PROMPT,
+                system_prompt=self._resolve_prompt(REVISION_SYSTEM_PROMPT, "agent_prompt_ScriptWriter_Revision"),
                 user_prompt=user_prompt,
                 max_tokens=8192,
             )

@@ -47,6 +47,19 @@ class BaseAgent(ABC):
             )
         return self._client
 
+    def _resolve_prompt(self, default_prompt: str, prompt_key: str | None = None) -> str:
+        """Return DB-overridden system prompt if one exists, else the default."""
+        key = prompt_key or f"agent_prompt_{self.name}"
+        try:
+            from backend.database import get_pipeline_config
+            cfg = get_pipeline_config()
+            override = cfg.get(key)
+            if override and isinstance(override, str) and override.strip():
+                return override
+        except Exception:
+            pass
+        return default_prompt
+
     async def call_llm(
         self,
         system_prompt: str,

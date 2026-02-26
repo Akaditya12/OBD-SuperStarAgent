@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-    Loader2, Users, Shield, UserPlus, StopCircle, RefreshCw,
-    Settings, Save, RotateCcw, Sliders, Mic2, FileText, Volume2,
+    Loader2, Users, Shield, UserPlus, RefreshCw,
+    Settings, Save, RotateCcw, Mic2, FileText, Volume2,
+    Bot, ChevronDown, ChevronUp, Undo2,
 } from "lucide-react";
 
 interface User {
@@ -45,7 +46,16 @@ const DEFAULTS: PipelineConfig = {
     default_tts_engine: "elevenlabs",
 };
 
-type Tab = "users" | "pipeline";
+interface AgentConfig {
+    key: string;
+    label: string;
+    description: string;
+    default_prompt: string;
+    custom_prompt: string;
+    is_customized: boolean;
+}
+
+type Tab = "users" | "pipeline" | "agents";
 
 export default function AdminPage() {
     const router = useRouter();
@@ -67,6 +77,14 @@ export default function AdminPage() {
     const [configSaving, setConfigSaving] = useState(false);
     const [configDirty, setConfigDirty] = useState(false);
     const [configMsg, setConfigMsg] = useState("");
+
+    // ── Agent Prompts State ──
+    const [agents, setAgents] = useState<AgentConfig[]>([]);
+    const [agentsLoading, setAgentsLoading] = useState(false);
+    const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+    const [editedPrompts, setEditedPrompts] = useState<Record<string, string>>({});
+    const [savingAgent, setSavingAgent] = useState<string | null>(null);
+    const [agentMsg, setAgentMsg] = useState<Record<string, string>>({});
 
     const fetchUsers = async () => {
         setLoading(true);
@@ -92,7 +110,56 @@ export default function AdminPage() {
         finally { setConfigLoading(false); }
     };
 
-    useEffect(() => { fetchUsers(); fetchConfig(); }, []);
+    const fetchAgents = async () => {
+        setAgentsLoading(true);
+        try {
+            const res = await fetch("/api/admin/agents");
+            if (res.ok) {
+                const data = await res.json();
+                setAgents(data.agents || []);
+                const edits: Record<string, string> = {};
+                for (const a of data.agents || []) {
+                    edits[a.key] = a.is_customized ? a.custom_prompt : a.default_prompt;
+                }
+                setEditedPrompts(edits);
+            }
+        } catch { /* ignore */ }
+        finally { setAgentsLoading(false); }
+    };
+
+    const saveAgentPrompt = async (agentKey: string) => {
+        setSavingAgent(agentKey);
+        setAgentMsg({});
+        try {
+            const res = await fetch(`/api/admin/agents/${agentKey}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: editedPrompts[agentKey] || "" }),
+            });
+            if (!res.ok) throw new Error("Failed to save");
+            setAgentMsg({ [agentKey]: "Saved" });
+            fetchAgents();
+            setTimeout(() => setAgentMsg({}), 3000);
+        } catch (err: any) { setAgentMsg({ [agentKey]: `Error: ${err.message}` }); }
+        finally { setSavingAgent(null); }
+    };
+
+    const resetAgentPrompt = async (agentKey: string) => {
+        setSavingAgent(agentKey);
+        try {
+            await fetch(`/api/admin/agents/${agentKey}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: "" }),
+            });
+            setAgentMsg({ [agentKey]: "Reset to default" });
+            fetchAgents();
+            setTimeout(() => setAgentMsg({}), 3000);
+        } catch { /* ignore */ }
+        finally { setSavingAgent(null); }
+    };
+
+    useEffect(() => { fetchUsers(); fetchConfig(); fetchAgents(); }, []);
 
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -197,6 +264,9 @@ export default function AdminPage() {
                 </button>
                 <button onClick={() => setTab("pipeline")} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === "pipeline" ? "bg-[var(--accent)] text-white shadow-sm" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}>
                     <Settings className="w-4 h-4" /> Pipeline Settings
+                </button>
+                <button onClick={() => setTab("agents")} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === "agents" ? "bg-[var(--accent)] text-white shadow-sm" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}>
+                    <Bot className="w-4 h-4" /> Agent Prompts
                 </button>
             </div>
 
@@ -455,6 +525,104 @@ export default function AdminPage() {
                                 </div>
                             </div>
                         </>
+                    )}
+                </div>
+            )}
+
+            {/* ═══════ Agent Prompts Tab ═══════ */}
+            {tab === "agents" && (
+                <div className="space-y-4">
+                    <p className="text-sm text-[var(--text-secondary)]">
+                        Edit the system prompt for each pipeline agent. Changes take effect on the next campaign generation.
+                        Resetting removes the custom prompt and reverts to the code default.
+                    </p>
+
+                    {agentsLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-6 h-6 animate-spin text-[var(--accent)]" />
+                        </div>
+                    ) : (
+                        agents.map((agent) => {
+                            const isExpanded = expandedAgent === agent.key;
+                            const currentPrompt = editedPrompts[agent.key] || "";
+                            const isDirty = agent.is_customized
+                                ? currentPrompt !== agent.custom_prompt
+                                : currentPrompt !== agent.default_prompt;
+                            const msg = agentMsg[agent.key];
+
+                            return (
+                                <div key={agent.key} className="bg-[var(--card)] border border-[var(--card-border)] rounded-2xl overflow-hidden shadow-sm">
+                                    {/* Header */}
+                                    <button
+                                        onClick={() => setExpandedAgent(isExpanded ? null : agent.key)}
+                                        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-[var(--accent-subtle)]/30 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-lg bg-[var(--accent-subtle)] flex items-center justify-center">
+                                                <Bot className="w-4 h-4 text-[var(--accent)]" />
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm font-semibold text-[var(--text-primary)]">{agent.label}</span>
+                                                    {agent.is_customized && (
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20 font-medium">
+                                                            Customized
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{agent.description}</p>
+                                            </div>
+                                        </div>
+                                        {isExpanded ? <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />}
+                                    </button>
+
+                                    {/* Expanded Content */}
+                                    {isExpanded && (
+                                        <div className="px-6 pb-5 pt-1 border-t border-[var(--card-border)]">
+                                            <textarea
+                                                value={currentPrompt}
+                                                onChange={(e) => setEditedPrompts((prev) => ({ ...prev, [agent.key]: e.target.value }))}
+                                                rows={16}
+                                                className="w-full bg-[var(--input-bg)] border border-[var(--card-border)] rounded-xl p-4 text-xs font-mono leading-relaxed resize-y focus:outline-none focus:border-[var(--accent)] text-[var(--text-primary)]"
+                                                spellCheck={false}
+                                            />
+                                            <div className="flex items-center justify-between mt-3">
+                                                <div className="text-xs">
+                                                    {msg && (
+                                                        <span className={msg.startsWith("Error") ? "text-[var(--error)]" : "text-[var(--success)]"}>
+                                                            {msg}
+                                                        </span>
+                                                    )}
+                                                    <span className="text-[var(--text-tertiary)] ml-2">
+                                                        {currentPrompt.length} chars
+                                                    </span>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    {agent.is_customized && (
+                                                        <button
+                                                            onClick={() => resetAgentPrompt(agent.key)}
+                                                            disabled={savingAgent === agent.key}
+                                                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card-border)] transition-colors disabled:opacity-40"
+                                                        >
+                                                            <Undo2 className="w-3.5 h-3.5" /> Reset to Default
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => saveAgentPrompt(agent.key)}
+                                                        disabled={savingAgent === agent.key || !isDirty}
+                                                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium text-white shadow-sm transition-all disabled:opacity-40"
+                                                        style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}
+                                                    >
+                                                        {savingAgent === agent.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                                                        Save
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
                     )}
                 </div>
             )}
