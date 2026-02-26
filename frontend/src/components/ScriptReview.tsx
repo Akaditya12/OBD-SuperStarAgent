@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Star, Clock, Hash, Download, FileJson, FileText } from "lucide-react";
+import { ChevronDown, ChevronUp, Star, Clock, Hash, Download, FileJson, FileText, Languages, Loader2 } from "lucide-react";
 import type { Script } from "@/lib/types";
 
 interface ScriptReviewProps {
@@ -46,6 +46,38 @@ function ScriptCard({
   isBest: boolean;
 }) {
   const [expanded, setExpanded] = useState(isBest);
+  const [translating, setTranslating] = useState(false);
+  const [translation, setTranslation] = useState<string | null>(null);
+  const [showTranslation, setShowTranslation] = useState(false);
+
+  const isNonEnglish = script.language && !script.language.toLowerCase().startsWith("english");
+
+  const handleTranslate = async () => {
+    if (translation) {
+      setShowTranslation(!showTranslation);
+      return;
+    }
+    setTranslating(true);
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: script.full_script || `${script.hook}\n${script.body}\n${script.cta}`,
+          source_language: script.language,
+        }),
+      });
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      setTranslation(data.translated);
+      setShowTranslation(true);
+    } catch {
+      setTranslation("Translation failed. Please try again.");
+      setShowTranslation(true);
+    } finally {
+      setTranslating(false);
+    }
+  };
 
   return (
     <div
@@ -104,6 +136,39 @@ function ScriptCard({
       {expanded && (
         <div className="px-4 pb-4 space-y-3 animate-fade-in">
           <div className="h-px bg-[var(--card-border)]" />
+
+          {/* Translate button */}
+          {isNonEnglish && (
+            <button
+              onClick={handleTranslate}
+              disabled={translating}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                showTranslation
+                  ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                  : "bg-[var(--input-bg)] text-[var(--text-tertiary)] border border-[var(--card-border)] hover:text-blue-400 hover:border-blue-500/30"
+              }`}
+            >
+              {translating ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Languages className="w-3 h-3" />
+              )}
+              {translating ? "Translating..." : showTranslation ? "Hide Translation" : "Translate to English"}
+            </button>
+          )}
+
+          {/* Translation result */}
+          {showTranslation && translation && (
+            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
+                <Languages className="w-3 h-3" />
+                English Translation
+              </span>
+              <p className="mt-1.5 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                {translation}
+              </p>
+            </div>
+          )}
 
           {/* Hook */}
           <div>
@@ -244,6 +309,10 @@ export default function ScriptReview({
   bestVariantId,
   sessionId,
 }: ScriptReviewProps) {
+  const hasNonEnglish = scripts?.some(
+    (s) => s.language && !s.language.toLowerCase().startsWith("english")
+  );
+
   if (!scripts || scripts.length === 0) {
     return (
       <div className="text-center py-8 text-[var(--muted)]">
@@ -255,8 +324,14 @@ export default function ScriptReview({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
+        <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider flex items-center gap-2">
           Generated Scripts ({scripts.length} variants)
+          {hasNonEnglish && (
+            <span className="text-[10px] font-normal normal-case tracking-normal px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              <Languages className="w-3 h-3 inline mr-1" />
+              Use translate button on each variant
+            </span>
+          )}
         </h3>
         <div className="flex items-center gap-2">
           <button

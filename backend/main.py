@@ -1601,6 +1601,57 @@ def _make_serializable(obj: Any) -> Any:
         return str(obj)
 
 
+# ── Translation Endpoint ───────────────────────────────────────────────
+
+@app.post("/api/translate")
+async def translate_script(request: Request):
+    """Translate script text to English using the LLM.
+
+    Expects: { text: string, source_language?: string }
+    Returns: { translated: string, source_language: string }
+    """
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    source_lang = body.get("source_language", "")
+
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "text is required"})
+
+    from backend.agents.base import BaseAgent
+
+    class TranslatorAgent(BaseAgent):
+        name = "Translator"
+        async def run(self, **kw: Any) -> dict[str, Any]:
+            return {}
+
+    agent = TranslatorAgent()
+    try:
+        system_prompt = (
+            "You are a professional translator. Translate the given text accurately to English. "
+            "Preserve the meaning, tone, and structure. Remove any audio/voice tags like [warm], [gentle], "
+            "[cheerfully], [short pause] etc. from the translation -- just translate the spoken words. "
+            "Return valid JSON: {\"translated\": \"...\", \"source_language\": \"...\"}"
+        )
+        user_prompt = f"Translate this to English:\n\n{text}"
+        if source_lang:
+            user_prompt = f"Source language: {source_lang}\n\n{user_prompt}"
+
+        response = await agent.call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=4096,
+            json_output=True,
+        )
+        result = agent.parse_json(response)
+        return {
+            "translated": result.get("translated", ""),
+            "source_language": result.get("source_language", source_lang or "Unknown"),
+        }
+    except Exception as e:
+        logger.error(f"Translation failed: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Translation failed: {str(e)}"})
+
+
 # ── Script-to-Voice Endpoints ──────────────────────────────────────────
 
 _stv_jobs: dict[str, dict[str, Any]] = {}
