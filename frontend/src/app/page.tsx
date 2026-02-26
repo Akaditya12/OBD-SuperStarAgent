@@ -85,6 +85,7 @@ function HomePageContent() {
   const [language, setLanguage] = useState("");
   const [promotionType, setPromotionType] = useState("obd_standard");
   const [ttsEngine, setTtsEngine] = useState<"auto" | "murf" | "elevenlabs" | "edge-tts">("auto");
+  const [forceReanalyze, setForceReanalyze] = useState(false);
 
   // Handle ?product= URL param from sidebar clicks
   useEffect(() => {
@@ -321,6 +322,7 @@ function HomePageContent() {
           telco,
           language: language || undefined,
           tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
+          force_reanalyze: forceReanalyze,
         }),
       });
 
@@ -784,6 +786,21 @@ function HomePageContent() {
                 ))}
               </div>
             </div>
+
+            {/* Re-analyse toggle */}
+            <label className="flex items-center gap-2.5 cursor-pointer group">
+              <div
+                role="switch"
+                aria-checked={forceReanalyze}
+                onClick={() => setForceReanalyze((v) => !v)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${forceReanalyze ? "bg-[var(--accent)]" : "bg-[var(--card-border)]"}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${forceReanalyze ? "translate-x-4" : ""}`} />
+              </div>
+              <span className="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors select-none">
+                Re-run product &amp; market analysis
+              </span>
+            </label>
 
             {/* Start button */}
             <button

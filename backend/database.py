@@ -290,3 +290,56 @@ def delete_comment(comment_id: str) -> bool:
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+# ── Analysis Cache ────────────────────────────────────────────────────────────
+
+def _analysis_cache_key(product_text: str, country: str, telco: str, language: str | None) -> str:
+    """Generate a stable hash key for an analysis input combination."""
+    import hashlib
+    raw = f"{product_text[:5000]}|{country}|{telco}|{language or ''}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def get_cached_analysis(product_text: str, country: str, telco: str, language: str | None) -> Optional[dict[str, Any]]:
+    """Look up cached product_brief + market_analysis for this input combo."""
+    cache_key = _analysis_cache_key(product_text, country, telco, language)
+
+    if supabase:
+        try:
+            resp = supabase.table("analysis_cache").select("*").eq("cache_key", cache_key).maybe_single().execute()
+            if resp.data:
+                logger.info("Analysis cache HIT for key %s", cache_key)
+                return {
+                    "product_brief": resp.data.get("product_brief"),
+                    "market_analysis": resp.data.get("market_analysis"),
+                }
+        except Exception as e:
+            logger.warning("Analysis cache lookup failed: %s", e)
+    return None
+
+
+def save_analysis_cache(
+    product_text: str,
+    country: str,
+    telco: str,
+    language: str | None,
+    product_brief: dict[str, Any],
+    market_analysis: dict[str, Any],
+) -> None:
+    """Store analysis results so they can be reused."""
+    cache_key = _analysis_cache_key(product_text, country, telco, language)
+
+    if supabase:
+        try:
+            supabase.table("analysis_cache").upsert({
+                "cache_key": cache_key,
+                "country": country,
+                "telco": telco,
+                "language": language or "",
+                "product_brief": product_brief,
+                "market_analysis": market_analysis,
+            }).execute()
+            logger.info("Saved analysis cache for key %s", cache_key)
+        except Exception as e:
+            logger.warning("Failed to save analysis cache: %s", e)

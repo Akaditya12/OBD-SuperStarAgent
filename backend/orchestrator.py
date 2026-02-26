@@ -17,6 +17,7 @@ from backend.agents import (
     VoiceSelectorAgent,
 )
 from backend.config import ELEVENLABS_API_KEY, EVAL_FEEDBACK_ROUNDS
+from backend.database import get_cached_analysis, save_analysis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class PipelineOrchestrator:
         telco: str,
         language: str | None = None,
         tts_engine: str | None = None,
+        force_reanalyze: bool = False,
     ) -> dict[str, Any]:
         """Execute the full pipeline.
 
@@ -74,6 +76,7 @@ class PipelineOrchestrator:
             country: Target country name.
             telco: Telco operator name.
             language: Optional target language override.
+            force_reanalyze: If True, skip cache and re-run analysis.
 
         Returns:
             Complete pipeline results including all intermediate outputs.
@@ -93,54 +96,75 @@ class PipelineOrchestrator:
         try:
             pipeline_start = time.monotonic()
 
-            # ── Steps 1 & 2: Product Analysis + Market Research (PARALLEL) ──
-            await self.on_progress("ProductAnalyzer", "started", {
-                "message": "Analyzing product documentation..."
-            })
-            await self.on_progress("MarketResearcher", "started", {
-                "message": f"Researching market: {country} / {telco}..."
-            })
-
-            async def _run_product_analysis() -> dict[str, Any]:
-                t0 = time.monotonic()
-                brief = await self.product_analyzer.run(product_text=product_text)
-                elapsed = time.monotonic() - t0
-                logger.info(f"[ProductAnalyzer] completed in {elapsed:.1f}s")
-                return brief
-
-            async def _run_market_research() -> dict[str, Any]:
-                t0 = time.monotonic()
-                # Market research doesn't need product_brief -- it uses country/telco
-                # We pass a minimal brief so it has product context
-                analysis = await self.market_researcher.run(
-                    country=country,
-                    telco=telco,
-                    product_brief={"product_name": "pending", "description": product_text[:500]},
-                )
-                elapsed = time.monotonic() - t0
-                logger.info(f"[MarketResearcher] completed in {elapsed:.1f}s")
-                return analysis
-
-            product_brief, market_analysis = await asyncio.gather(
-                _run_product_analysis(),
-                _run_market_research(),
+            # ── Steps 1 & 2: Product Analysis + Market Research ──
+            cached = None if force_reanalyze else get_cached_analysis(
+                product_text, country, telco, language,
             )
 
-            results["product_brief"] = product_brief
-            await self.on_progress("ProductAnalyzer", "completed", {
-                "message": f"Product analyzed: {product_brief.get('product_name', 'Unknown')}",
-                "data": product_brief,
-                "system_prompt": self.product_analyzer.last_system_prompt,
-                "user_prompt": self.product_analyzer.last_user_prompt,
-            })
+            if cached:
+                product_brief = cached["product_brief"]
+                market_analysis = cached["market_analysis"]
+                results["product_brief"] = product_brief
+                results["market_analysis"] = market_analysis
+                results["analysis_cached"] = True
+                await self.on_progress("ProductAnalyzer", "completed", {
+                    "message": f"Product analyzed: {product_brief.get('product_name', 'Unknown')} (cached)",
+                })
+                await self.on_progress("MarketResearcher", "completed", {
+                    "message": "Market analysis complete (cached)",
+                })
+                logger.info("Using cached analysis — skipping Steps 1 & 2")
+            else:
+                await self.on_progress("ProductAnalyzer", "started", {
+                    "message": "Analyzing product documentation..."
+                })
+                await self.on_progress("MarketResearcher", "started", {
+                    "message": f"Researching market: {country} / {telco}..."
+                })
 
-            results["market_analysis"] = market_analysis
-            await self.on_progress("MarketResearcher", "completed", {
-                "message": "Market analysis complete",
-                "data": market_analysis,
-                "system_prompt": self.market_researcher.last_system_prompt,
-                "user_prompt": self.market_researcher.last_user_prompt,
-            })
+                async def _run_product_analysis() -> dict[str, Any]:
+                    t0 = time.monotonic()
+                    brief = await self.product_analyzer.run(product_text=product_text)
+                    elapsed = time.monotonic() - t0
+                    logger.info(f"[ProductAnalyzer] completed in {elapsed:.1f}s")
+                    return brief
+
+                async def _run_market_research() -> dict[str, Any]:
+                    t0 = time.monotonic()
+                    analysis = await self.market_researcher.run(
+                        country=country,
+                        telco=telco,
+                        product_brief={"product_name": "pending", "description": product_text[:500]},
+                    )
+                    elapsed = time.monotonic() - t0
+                    logger.info(f"[MarketResearcher] completed in {elapsed:.1f}s")
+                    return analysis
+
+                product_brief, market_analysis = await asyncio.gather(
+                    _run_product_analysis(),
+                    _run_market_research(),
+                )
+
+                results["product_brief"] = product_brief
+                await self.on_progress("ProductAnalyzer", "completed", {
+                    "message": f"Product analyzed: {product_brief.get('product_name', 'Unknown')}",
+                    "data": product_brief,
+                    "system_prompt": self.product_analyzer.last_system_prompt,
+                    "user_prompt": self.product_analyzer.last_user_prompt,
+                })
+
+                results["market_analysis"] = market_analysis
+                await self.on_progress("MarketResearcher", "completed", {
+                    "message": "Market analysis complete",
+                    "data": market_analysis,
+                    "system_prompt": self.market_researcher.last_system_prompt,
+                    "user_prompt": self.market_researcher.last_user_prompt,
+                })
+
+                save_analysis_cache(
+                    product_text, country, telco, language,
+                    product_brief, market_analysis,
+                )
 
             # ── Step 3: Script Generation ──
             await self.on_progress("ScriptWriter", "started", {

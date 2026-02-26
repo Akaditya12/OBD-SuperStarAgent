@@ -115,6 +115,7 @@ async def _run_pipeline_bg(
     language: Optional[str],
     provider: Optional[str],
     tts_engine: Optional[str] = None,
+    force_reanalyze: bool = False,
 ) -> None:
     """Run the pipeline as a background task, storing progress in state."""
 
@@ -150,6 +151,7 @@ async def _run_pipeline_bg(
             telco=telco,
             language=language,
             tts_engine=tts_engine,
+            force_reanalyze=force_reanalyze,
         )
         session_id = result.get("session_id", state.session_id)
         result["country"] = country
@@ -569,6 +571,7 @@ async def start_pipeline(request: Request):
     language = body.get("language")
     provider = body.get("provider")
     tts_engine = body.get("tts_engine")
+    force_reanalyze = body.get("force_reanalyze", False)
 
     if not product_text or not country or not telco:
         return JSONResponse(
@@ -581,7 +584,7 @@ async def start_pipeline(request: Request):
     pipelines[session_id] = state
 
     task = asyncio.create_task(
-        _run_pipeline_bg(state, product_text, country, telco, language, provider, tts_engine)
+        _run_pipeline_bg(state, product_text, country, telco, language, provider, tts_engine, force_reanalyze)
     )
     state.task = task
 
@@ -1379,6 +1382,7 @@ async def websocket_generate(ws: WebSocket):
         language = config.get("language")
         provider = config.get("provider")
         tts_engine = config.get("tts_engine")
+        force_reanalyze = config.get("force_reanalyze", False)
 
         if not product_text or not country or not telco:
             await ws.send_json({
@@ -1389,7 +1393,6 @@ async def websocket_generate(ws: WebSocket):
             await ws.close()
             return
 
-        # Progress callback that sends updates via WebSocket
         async def on_progress(agent: str, status: str, data: dict[str, Any]) -> None:
             try:
                 await ws.send_json({
@@ -1415,6 +1418,7 @@ async def websocket_generate(ws: WebSocket):
             telco=telco,
             language=language,
             tts_engine=tts_engine,
+            force_reanalyze=force_reanalyze,
         )
 
         session_id = result.get("session_id", "unknown")
