@@ -277,9 +277,9 @@ EDGE_VOICE_POOL: dict[str, list[tuple[str, str]]] = {
         ("en-GH-EsiNeural", "Esi Alt (Female)"),
     ],
     "en-TZ": [
-        ("en-TZ-ElimuNeural", "Elimu (Male)"),
         ("en-TZ-ImaniNeural", "Imani (Female)"),
-        ("en-TZ-ElimuNeural", "Elimu Alt (Male)"),
+        ("en-TZ-ElimuNeural", "Elimu (Male)"),
+        ("en-TZ-ImaniNeural", "Imani Alt (Female)"),
     ],
     "zu-ZA": [
         ("zu-ZA-ThandoNeural", "Thando (Female)"),
@@ -305,6 +305,16 @@ EDGE_VOICE_POOL: dict[str, list[tuple[str, str]]] = {
         ("fil-PH-BlessicaNeural", "Blessica (Female)"),
         ("fil-PH-AngeloNeural", "Angelo (Male)"),
         ("fil-PH-BlessicaNeural", "Blessica Alt (Female)"),
+    ],
+    "ar-SA": [
+        ("ar-SA-ZariyahNeural", "Zariyah (Female)"),
+        ("ar-SA-HamedNeural", "Hamed (Male)"),
+        ("ar-EG-SalmaNeural", "Salma (Female)"),
+    ],
+    "ar-EG": [
+        ("ar-EG-SalmaNeural", "Salma (Female)"),
+        ("ar-EG-ShakirNeural", "Shakir (Male)"),
+        ("ar-SA-ZariyahNeural", "Zariyah (Female)"),
     ],
 }
 
@@ -1017,65 +1027,92 @@ class AudioProducerAgent(BaseAgent):
         Uses LLM-selected alternatives first, then fills from a curated
         list of known-good premium voices with gender diversity.
         """
+        fallback_gender = ""
         if not primary_voice_id or not primary_voice_id.strip():
             from backend.agents.voice_selector import _CURATED_ELEVENLABS_VOICES
             if _CURATED_ELEVENLABS_VOICES:
                 fallback = _CURATED_ELEVENLABS_VOICES[0]
                 primary_voice_id = fallback["voice_id"]
                 primary_name = f"{fallback['name']} (Auto)"
-                logger.info(f"[{self.name}] Empty primary voice_id; using curated fallback: {primary_name}")
+                fallback_gender = fallback.get("labels", {}).get("gender", "female")
+                logger.info(f"[{self.name}] Empty primary voice_id; using curated fallback: {primary_name} ({fallback_gender})")
 
-        pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
+        primary_gender = (
+            voice_selection.get("selected_voice", {}).get("gender", "").lower()
+            or fallback_gender
+            or "female"
+        )
         seen_ids = {primary_voice_id}
 
-        alt_voices = voice_selection.get("alternative_voices", [])
-        for av in alt_voices[:2]:
-            avid = av.get("voice_id", "")
-            if avid and avid not in seen_ids:
-                pool.append((avid, av.get("name", "Alt")))
-                seen_ids.add(avid)
+        is_african = country.lower() in {
+            "nigeria", "kenya", "tanzania", "south africa", "ghana",
+            "cameroon", "senegal", "congo (drc)", "congo (republic)",
+            "ethiopia", "mozambique", "rwanda", "uganda", "zambia",
+            "zimbabwe", "botswana", "somalia",
+        }
 
-        if len(pool) < 3:
-            primary_gender = voice_selection.get("selected_voice", {}).get("gender", "").lower()
-            primary_accent = voice_selection.get("selected_voice", {}).get("accent", "").lower()
-            is_african = country.lower() in {
-                "nigeria", "kenya", "tanzania", "south africa", "ghana",
-                "cameroon", "senegal", "congo (drc)", "congo (republic)",
-                "ethiopia", "mozambique", "rwanda", "uganda", "zambia",
-                "zimbabwe", "botswana", "somalia",
-            }
-            female_voices = [
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
-                ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female)"),
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
-                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female)"),
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
-                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
-            ] if is_african else [
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
-                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
-                ("jsCqWAovK2LkecY7zXl4", "Freya (Female)"),
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
-            ]
-            male_voices = [
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
-                ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
-                ("nPczCjzI2devNBz1zQrb", "Brian (Male)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
-            ] if is_african else [
-                ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
-                ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
-            ]
-            prefer_opposite = male_voices if primary_gender == "female" else female_voices
-            prefer_same = female_voices if primary_gender == "female" else male_voices
-            for vid, lbl in prefer_opposite + prefer_same:
-                if vid not in seen_ids and len(pool) < 3:
-                    pool.append((vid, lbl))
-                    seen_ids.add(vid)
+        import random
+        female_voices = [
+            ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
+            ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female)"),
+            ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
+            ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female)"),
+            ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
+            ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
+            ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+        ] if is_african else [
+            ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
+            ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
+            ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
+            ("jsCqWAovK2LkecY7zXl4", "Freya (Female)"),
+            ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
+            ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female)"),
+            ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+        ]
+        male_voices = [
+            ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
+            ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
+            ("nPczCjzI2devNBz1zQrb", "Brian (Male)"),
+            ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
+        ] if is_african else [
+            ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
+            ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
+            ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
+            ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
+        ]
+
+        # Shuffle for variety across sessions
+        random.shuffle(female_voices)
+        random.shuffle(male_voices)
+
+        # Always enforce 2 female + 1 male, ignoring LLM alt_voices for gender balance
+        pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
+        female_count = 1 if primary_gender == "female" else 0
+        male_count = 1 if primary_gender == "male" else 0
+        need_female = 2 - female_count
+        need_male = 1 - male_count
+
+        for vid, lbl in female_voices:
+            if need_female <= 0:
+                break
+            if vid not in seen_ids:
+                pool.append((vid, lbl))
+                seen_ids.add(vid)
+                need_female -= 1
+        for vid, lbl in male_voices:
+            if need_male <= 0:
+                break
+            if vid not in seen_ids:
+                pool.append((vid, lbl))
+                seen_ids.add(vid)
+                need_male -= 1
+        # Fill remaining if still short
+        for vid, lbl in female_voices + male_voices:
+            if len(pool) >= 3:
+                break
+            if vid not in seen_ids:
+                pool.append((vid, lbl))
+                seen_ids.add(vid)
 
         logger.info(f"[{self.name}] ElevenLabs voice pool: {[p[1] for p in pool]}")
         while len(pool) < 3:
@@ -1108,12 +1145,28 @@ class AudioProducerAgent(BaseAgent):
 
         if tts_engine_override in ("murf", "elevenlabs", "edge-tts"):
             tts_engine = tts_engine_override
-        elif self._has_elevenlabs_credits():
-            has_quota = await self._check_elevenlabs_quota()
-            if has_quota:
-                tts_engine = "elevenlabs"
-        elif MURF_API_KEY:
-            tts_engine = "murf"
+        else:
+            # Smart auto: non-English languages benefit from edge-tts locale-specific voices
+            _is_non_english = (
+                language
+                and language.lower().strip() not in ("english", "en", "")
+            )
+            _has_locale_voice = (
+                _is_non_english
+                and language.lower().strip() in LANGUAGE_TO_LOCALE
+            )
+            if _has_locale_voice:
+                tts_engine = "edge-tts"
+                logger.info(
+                    f"[{self.name}] Auto-selecting edge-tts for language '{language}' "
+                    f"(locale-specific voice available)"
+                )
+            elif self._has_elevenlabs_credits():
+                has_quota = await self._check_elevenlabs_quota()
+                if has_quota:
+                    tts_engine = "elevenlabs"
+            elif MURF_API_KEY:
+                tts_engine = "murf"
 
         if tts_engine == "murf":
             if not MURF_API_KEY:
@@ -1300,9 +1353,16 @@ class AudioProducerAgent(BaseAgent):
         country: str = "",
         language: str | None = None,
         tts_engine_override: str | None = None,
+        num_voices: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Generate hook-only audio previews with 3 voices per variant (no BGM)."""
+        """Generate hook-only audio previews with N voices per variant (no BGM)."""
+        from backend.database import get_pipeline_config
+        config = get_pipeline_config()
+        n_voices = num_voices or config.get("num_hook_voices", 3)
+        if not isinstance(n_voices, int) or n_voices < 2:
+            n_voices = 3
+
         session_id = session_id or str(uuid.uuid4())[:8]
         session_dir = OUTPUTS_DIR / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -1310,6 +1370,9 @@ class AudioProducerAgent(BaseAgent):
         engine_ctx = await self._resolve_engine(voice_selection, country, language, tts_engine_override)
         tts_engine = engine_ctx["tts_engine"]
         voice_pool = engine_ctx["voice_pool"]
+        while len(voice_pool) < n_voices:
+            voice_pool.append(voice_pool[0])
+        voice_pool = voice_pool[:n_voices]
         script_list = scripts.get("scripts", [])
 
         jobs: list[dict[str, Any]] = []
@@ -1325,7 +1388,7 @@ class AudioProducerAgent(BaseAgent):
             if not hook_text or not hook_text.strip():
                 continue
 
-            for voice_idx in range(3):
+            for voice_idx in range(n_voices):
                 job: dict[str, Any] = {
                     "text": hook_text,
                     "path": session_dir / f"variant_{variant_id}_voice{voice_idx + 1}_hook_preview.mp3",
@@ -1371,7 +1434,7 @@ class AudioProducerAgent(BaseAgent):
                         hook_text = (script.get("full_script", "") or "")[:200]
                     if not hook_text.strip():
                         continue
-                    for vi in range(min(3, len(voice_pool))):
+                    for vi in range(min(n_voices, len(voice_pool))):
                         rj: dict[str, Any] = {
                             "text": hook_text,
                             "path": session_dir / f"variant_{variant_id}_voice{vi + 1}_hook_preview.mp3",

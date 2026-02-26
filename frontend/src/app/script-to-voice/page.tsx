@@ -79,6 +79,7 @@ export default function ScriptToVoicePage() {
   const [previews, setPreviews] = useState<VoicePreview[]>([]);
   const [sessionId, setSessionId] = useState("");
   const [selectedVoice, setSelectedVoice] = useState<number>(0);
+  const [activeTtsEngine, setActiveTtsEngine] = useState<string>("");
 
   // Final audio state
   const [generating, setGenerating] = useState(false);
@@ -200,6 +201,7 @@ export default function ScriptToVoicePage() {
       }
       setPreviews(successful);
       setSelectedVoice(0);
+      setActiveTtsEngine((previewData?.tts_engine as string) || "");
       setStep("previews");
     } catch (err: unknown) {
       setPreviewError(err instanceof Error ? err.message : "Preview failed");
@@ -263,6 +265,7 @@ export default function ScriptToVoicePage() {
     setSessionId("");
     setPreviewError("");
     setGenerateError("");
+    setActiveTtsEngine("");
     setBgmId(null);
     setBgmFileName("");
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
@@ -339,7 +342,7 @@ export default function ScriptToVoicePage() {
             </div>
 
             {/* Country / Operator / Language */}
-            <div className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] p-6">
+            <div className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] p-6 space-y-3">
               <CountryTelcoSelect
                 country={country}
                 telco={telco}
@@ -348,6 +351,11 @@ export default function ScriptToVoicePage() {
                 onTelcoChange={setTelco}
                 onLanguageChange={setLanguage}
               />
+              {language && language.toLowerCase() !== "english" && (
+                <p className="text-[10px] text-amber-500 bg-amber-500/10 px-3 py-1.5 rounded-lg">
+                  Tip: Write your script in {language} for the best pronunciation. The voice engine will match the selected language.
+                </p>
+              )}
             </div>
 
             {/* TTS Engine + BGM + Format */}
@@ -476,10 +484,17 @@ export default function ScriptToVoicePage() {
         {step === "previews" && (
           <div className="space-y-6">
             <div className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] p-6 space-y-5">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                <Mic2 className="w-4 h-4 text-[var(--accent)]" />
-                Choose Your Voice
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                  <Mic2 className="w-4 h-4 text-[var(--accent)]" />
+                  Choose Your Voice
+                </h2>
+                {activeTtsEngine && (
+                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] font-medium border border-[var(--accent)]/20">
+                    {activeTtsEngine === "elevenlabs" ? "ElevenLabs" : activeTtsEngine === "murf" ? "Murf AI" : activeTtsEngine === "edge-tts" ? "Edge TTS" : activeTtsEngine}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-[var(--text-tertiary)]">
                 Listen to each voice and select the one you prefer for the final audio.
               </p>
@@ -490,24 +505,25 @@ export default function ScriptToVoicePage() {
                   const id = `preview-${i}`;
                   const isSelected = selectedVoice === i;
                   return (
-                    <button
+                    <div
                       key={i}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedVoice(i)}
-                      className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedVoice(i); }}
+                      className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left cursor-pointer ${
                         isSelected
                           ? "border-[var(--accent)] bg-[var(--accent-subtle)] shadow-sm"
                           : "border-[var(--card-border)] hover:border-[var(--card-border-hover)] hover:bg-[var(--card-hover)]"
                       }`}
                       style={isSelected ? { boxShadow: "0 2px 12px var(--accent-glow)" } : undefined}
                     >
-                      {/* Selection indicator */}
                       <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
                         isSelected ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--card-border)]"
                       }`}>
                         {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
 
-                      {/* Voice info */}
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-semibold ${isSelected ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
                           {p.voice_label || p.voice_name || `Voice ${i + 1}`}
@@ -517,7 +533,6 @@ export default function ScriptToVoicePage() {
                         </p>
                       </div>
 
-                      {/* Play button */}
                       <button
                         onClick={(e) => { e.stopPropagation(); playAudio(audioUrl, id); }}
                         disabled={!audioUrl}
@@ -535,7 +550,7 @@ export default function ScriptToVoicePage() {
                           <Play className="w-4 h-4" />
                         )}
                       </button>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -598,7 +613,12 @@ export default function ScriptToVoicePage() {
                 </div>
                 <h2 className="text-lg font-bold text-[var(--text-primary)]">Audio Ready</h2>
                 <p className="text-xs text-[var(--text-tertiary)]">
-                  Voice: {finalAudio.voice_name} &middot; Format: {audioFormat.toUpperCase()} &middot; BGM: {bgmStyle}
+                  Voice: {finalAudio.voice_name} &middot; Format: {audioFormat.toUpperCase()} &middot; BGM: {bgmStyle === "none" ? "None" : bgmStyle}
+                  {activeTtsEngine && (
+                    <span className="ml-2 inline-flex px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] text-[10px] font-medium">
+                      {activeTtsEngine === "elevenlabs" ? "ElevenLabs" : activeTtsEngine === "murf" ? "Murf AI" : activeTtsEngine === "edge-tts" ? "Edge TTS" : activeTtsEngine}
+                    </span>
+                  )}
                 </p>
               </div>
 

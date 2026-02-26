@@ -41,7 +41,7 @@ import type {
   HookPreviewResult,
   AudioResult,
 } from "@/lib/types";
-import { Music, Radio } from "lucide-react";
+import { Music, Radio, Upload, VolumeX } from "lucide-react";
 
 type WizardStep = "input" | "running" | "results";
 
@@ -132,11 +132,14 @@ function HomePageContent() {
 
   // Hook preview voice selection & full audio generation
   const [voiceChoices, setVoiceChoices] = useState<Record<number, number>>({});
-  const [bgmStyle, setBgmStyle] = useState<"upbeat" | "calm" | "corporate">("upbeat");
+  const [bgmStyle, setBgmStyle] = useState<string>("upbeat");
   const [audioFormat, setAudioFormat] = useState<"mp3" | "wav">("mp3");
   const [generatingFullAudio, setGeneratingFullAudio] = useState(false);
   const [bgmPreviewPlaying, setBgmPreviewPlaying] = useState<string | null>(null);
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [customBgmId, setCustomBgmId] = useState<string>("");
+  const [customBgmName, setCustomBgmName] = useState<string>("");
+  const [uploadingBgm, setUploadingBgm] = useState(false);
 
   // WebSocket ref
   const wsRef = useRef<WebSocket | null>(null);
@@ -519,6 +522,27 @@ function HomePageContent() {
     setBgmPreviewPlaying(style);
   };
 
+  const handleBgmUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingBgm(true);
+    try {
+      const form = new FormData();
+      form.append("bgm_file", file);
+      const res = await fetch("/api/script-to-voice/upload-bgm", { method: "POST", body: form });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      setCustomBgmId(data.bgm_id);
+      setCustomBgmName(file.name);
+      setBgmStyle("custom");
+      toast("success", `BGM uploaded: ${file.name}`);
+    } catch {
+      toast("error", "Failed to upload BGM file");
+    } finally {
+      setUploadingBgm(false);
+    }
+  };
+
   // ── Generate full audio (Phase 2) -- async job with polling ──
   const generateFullAudio = async () => {
     if (!result?.session_id) return;
@@ -533,13 +557,14 @@ function HomePageContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             voice_choices: voiceChoices,
-            bgm_style: bgmStyle,
+            bgm_style: bgmStyle === "custom" ? "upbeat" : bgmStyle,
             audio_format: audioFormat,
             tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
             scripts: finalScripts,
             voice_selection: result.voice_selection,
             country,
             language: language || undefined,
+            bgm_id: bgmStyle === "custom" ? customBgmId : undefined,
           }),
         }
       );
@@ -592,6 +617,8 @@ function HomePageContent() {
     setAudioFormat("mp3");
     setGeneratingFullAudio(false);
     setBgmPreviewPlaying(null);
+    setCustomBgmId("");
+    setCustomBgmName("");
     if (bgmAudioRef.current) bgmAudioRef.current.pause();
     setProgressSteps(
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
@@ -1064,6 +1091,11 @@ function HomePageContent() {
                 <h3 className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
                   <Radio className="w-4 h-4 text-[var(--accent)]" />
                   Choose Your Voice
+                  {resolvedEngineLabel && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] font-medium border border-[var(--accent)]/20">
+                      {resolvedEngineLabel}
+                    </span>
+                  )}
                   <span className="text-[10px] text-[var(--text-tertiary)] ml-1 font-normal">
                     Listen to hook previews and select a voice for each variant
                   </span>
@@ -1145,16 +1177,51 @@ function HomePageContent() {
                 <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
                   <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-1">
                     <Music className="w-4 h-4 text-[var(--accent)]" />
-                    Background Music Style
+                    Background Music
                   </label>
                   <p className="text-[10px] text-[var(--text-tertiary)] mb-3">
-                    Click the play button to preview each style before applying
+                    Choose a style, upload your own, or generate voice-only audio
                   </p>
+
+                  {/* No BGM + Upload row */}
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setBgmStyle("none")}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all ${bgmStyle === "none"
+                          ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
+                          : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
+                        }`}
+                    >
+                      <VolumeX className={`w-4 h-4 shrink-0 ${bgmStyle === "none" ? "text-[var(--accent)]" : "text-[var(--text-tertiary)]"}`} />
+                      <div>
+                        <div className={`text-xs font-medium ${bgmStyle === "none" ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>No BGM</div>
+                        <div className="text-[10px] text-[var(--text-tertiary)]">Voice only</div>
+                      </div>
+                    </button>
+                    <label
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all cursor-pointer ${bgmStyle === "custom"
+                          ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
+                          : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
+                        }`}
+                    >
+                      <Upload className={`w-4 h-4 shrink-0 ${bgmStyle === "custom" ? "text-[var(--accent)]" : "text-[var(--text-tertiary)]"}`} />
+                      <div className="min-w-0">
+                        <div className={`text-xs font-medium ${bgmStyle === "custom" ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
+                          {uploadingBgm ? "Uploading..." : customBgmName || "Upload BGM"}
+                        </div>
+                        <div className="text-[10px] text-[var(--text-tertiary)] truncate">{customBgmName ? customBgmName : "MP3/WAV file"}</div>
+                      </div>
+                      <input type="file" accept="audio/*" onChange={handleBgmUpload} className="hidden" disabled={uploadingBgm} />
+                    </label>
+                  </div>
+
+                  {/* Preset styles */}
                   <div className="grid grid-cols-3 gap-2">
                     {([
-                      { id: "upbeat" as const, label: "Upbeat", desc: "Energetic, 110 BPM" },
-                      { id: "calm" as const, label: "Calm", desc: "Soft piano, 80 BPM" },
-                      { id: "corporate" as const, label: "Corporate", desc: "Clean & minimal, 100 BPM" },
+                      { id: "upbeat", label: "Upbeat", desc: "Energetic, 110 BPM" },
+                      { id: "calm", label: "Calm", desc: "Soft piano, 80 BPM" },
+                      { id: "corporate", label: "Corporate", desc: "Clean & minimal, 100 BPM" },
                     ]).map((opt) => {
                       const isPlaying = bgmPreviewPlaying === opt.id;
                       return (

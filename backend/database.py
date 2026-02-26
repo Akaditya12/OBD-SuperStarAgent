@@ -351,6 +351,7 @@ _PIPELINE_DEFAULTS: dict[str, Any] = {
     "max_script_words": 75,
     "num_script_variants": 5,
     "eval_feedback_rounds": 1,
+    "num_hook_voices": 3,
     "elevenlabs_tts_model": "eleven_multilingual_v2",
     "elevenlabs_output_format": "mp3_44100_192",
     "voice_stability": 0.35,

@@ -1068,6 +1068,14 @@ async def generate_full_audio(session_id: str, request: Request):
     bgm_style = body.get("bgm_style", "upbeat")
     audio_format = body.get("audio_format", "mp3")
     tts_engine_choice = body.get("tts_engine")
+    bgm_id = body.get("bgm_id")
+
+    custom_bgm_file = None
+    if bgm_id:
+        bgm_dir = OUTPUTS_DIR / "_custom_bgm"
+        candidates = list(bgm_dir.glob(f"{bgm_id}.*")) if bgm_dir.exists() else []
+        if candidates:
+            custom_bgm_file = str(candidates[0])
 
     result = sessions.get(session_id)
     if not result:
@@ -1114,6 +1122,7 @@ async def generate_full_audio(session_id: str, request: Request):
                 tts_engine_override=tts_engine_choice or (result or {}).get("tts_engine_choice") or None,
                 bgm_style=bgm_style,
                 audio_format=audio_format,
+                custom_bgm_path=custom_bgm_file,
             )
             if result:
                 result["audio"] = audio_result
@@ -1611,11 +1620,13 @@ async def stv_preview(request: Request):
     _stv_jobs[job_id] = {"status": "running", "session_id": session_id}
 
     fake_scripts: dict[str, Any] = {
+        "language_used": language or "English",
         "scripts": [{
             "variant_id": 1,
             "theme": "Script to Voice",
             "hook": script_text[:300],
             "full_script": script_text,
+            "language": language or "English",
         }],
     }
 
@@ -1720,7 +1731,7 @@ async def stv_generate(request: Request):
         "voice_settings": {},
     }
 
-    voice_choices = {1: int(voice_choice)}
+    voice_choices = {1: int(voice_choice) + 1}
 
     job_id = uuid.uuid4().hex[:12]
     _stv_jobs[job_id] = {"status": "running", "session_id": session_id}
