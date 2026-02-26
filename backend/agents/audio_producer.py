@@ -1465,6 +1465,7 @@ class AudioProducerAgent(BaseAgent):
                 {"voice_index": i + 1, "voice_label": v.get("voice_label", f"Voice {i + 1}")}
                 for i, v in enumerate(voice_pool)
             ],
+            "engine_ctx": engine_ctx,
             "hook_previews": successful,
             "failed_previews": failed,
             "summary": {
@@ -1488,6 +1489,7 @@ class AudioProducerAgent(BaseAgent):
         bgm_style: str = "upbeat",
         audio_format: str = "mp3",
         custom_bgm_path: str | Path | None = None,
+        prebuilt_engine_ctx: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Generate full audio for all sections using the user-chosen voice per variant.
@@ -1496,11 +1498,15 @@ class AudioProducerAgent(BaseAgent):
             voice_choices: mapping of variant_id -> voice_index (1-based).
             bgm_style: one of "upbeat", "calm", "corporate".
             audio_format: "mp3" or "wav" -- if wav, files are converted before upload.
+            prebuilt_engine_ctx: reuse engine context from preview phase to keep voice pool consistent.
         """
         session_dir = OUTPUTS_DIR / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
 
-        engine_ctx = await self._resolve_engine(voice_selection, country, language, tts_engine_override)
+        if prebuilt_engine_ctx:
+            engine_ctx = prebuilt_engine_ctx
+        else:
+            engine_ctx = await self._resolve_engine(voice_selection, country, language, tts_engine_override)
         tts_engine = engine_ctx["tts_engine"]
         voice_pool = engine_ctx["voice_pool"]
         script_list = scripts.get("scripts", [])

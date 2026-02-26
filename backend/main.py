@@ -1105,6 +1105,12 @@ async def generate_full_audio(session_id: str, request: Request):
     country_val = body.get("country") or (result or {}).get("country", "")
     language_val = body.get("language") or (result or {}).get("language") or None
 
+    # Reuse engine_ctx from preview phase to keep voice pool consistent
+    stored_engine_ctx = None
+    hook_data = (result or {}).get("hook_previews")
+    if hook_data and isinstance(hook_data, dict):
+        stored_engine_ctx = hook_data.get("engine_ctx")
+
     job_id = uuid.uuid4().hex[:12]
     _audio_jobs[job_id] = {"status": "running", "session_id": session_id}
 
@@ -1123,6 +1129,7 @@ async def generate_full_audio(session_id: str, request: Request):
                 bgm_style=bgm_style,
                 audio_format=audio_format,
                 custom_bgm_path=custom_bgm_file,
+                prebuilt_engine_ctx=stored_engine_ctx,
             )
             if result:
                 result["audio"] = audio_result
@@ -1731,6 +1738,12 @@ async def stv_generate(request: Request):
         "voice_settings": {},
     }
 
+    # Retrieve the engine_ctx from the preview phase so the same voice pool is used
+    stored_engine_ctx = None
+    preview_data = existing.get("hook_previews")
+    if preview_data and isinstance(preview_data, dict):
+        stored_engine_ctx = preview_data.get("engine_ctx")
+
     voice_choices = {1: int(voice_choice) + 1}
 
     job_id = uuid.uuid4().hex[:12]
@@ -1758,6 +1771,7 @@ async def stv_generate(request: Request):
                 bgm_style=bgm_style,
                 audio_format=audio_format,
                 custom_bgm_path=custom_bgm_file,
+                prebuilt_engine_ctx=stored_engine_ctx,
             )
             if session_id in sessions:
                 sessions[session_id]["audio"] = audio_result
