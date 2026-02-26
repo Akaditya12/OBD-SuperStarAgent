@@ -71,19 +71,32 @@ EDGE_VOICE_MAP: dict[str, str] = {
     "pt-BR": "pt-BR-FranciscaNeural",
     "ar-SA": "ar-SA-ZariyahNeural",
     "zu-ZA": "zu-ZA-ThandoNeural",
+    "af-ZA": "af-ZA-AdriNeural",
     "so-SO": "so-SO-UbaxNeural",
 }
 
 COUNTRY_LOCALE: dict[str, str] = {
-    "India": "en-IN", "Nigeria": "en-NG", "Kenya": "en-KE",
-    "Tanzania": "en-TZ", "South Africa": "en-ZA", "Ghana": "en-GH",
-    "Cameroon": "fr-CM", "Senegal": "fr-SN", "Congo (DRC)": "fr-CD",
-    "Congo (Republic)": "fr-CD", "Ethiopia": "am-ET",
-    "Mozambique": "pt-BR", "Rwanda": "en-KE", "Uganda": "en-KE",
+    # Africa
+    "Nigeria": "en-NG", "Kenya": "en-KE", "Tanzania": "sw-KE",
+    "South Africa": "en-ZA", "Ghana": "en-GH",
+    "Cameroon": "fr-FR", "Senegal": "fr-FR",
+    "Congo (DRC)": "fr-FR", "Congo (Republic)": "fr-FR",
+    "Ethiopia": "am-ET", "Mozambique": "pt-BR",
+    "Rwanda": "en-KE", "Uganda": "en-KE",
     "Zambia": "en-ZA", "Zimbabwe": "en-ZA", "Botswana": "en-ZA",
-    "Somalia": "so-SO", "Bangladesh": "bn-IN", "Pakistan": "ur-PK",
+    "Somalia": "so-SO", "Mali": "fr-FR", "Ivory Coast": "fr-FR",
+    "Burkina Faso": "fr-FR", "Niger": "fr-FR", "Guinea": "fr-FR",
+    "Benin": "fr-FR", "Togo": "fr-FR", "Madagascar": "fr-FR",
+    "Chad": "fr-FR", "Sierra Leone": "en-KE", "Liberia": "en-US",
+    "Malawi": "en-KE", "Namibia": "en-ZA", "Lesotho": "en-ZA",
+    "Eswatini": "en-ZA", "Gabon": "fr-FR",
+    # South Asia
+    "India": "en-IN", "Bangladesh": "bn-IN", "Pakistan": "ur-PK",
+    # Southeast Asia
     "Indonesia": "id-ID", "Philippines": "fil-PH",
+    # Caribbean / Latin America
     "Guyana": "en-US", "Haiti": "fr-FR",
+    "Jamaica": "en-US", "Trinidad and Tobago": "en-US",
 }
 
 # Prosody per section type -- warm and clear with slight variation
@@ -136,7 +149,7 @@ def _clean_text_for_tts(text: str, apply_pronunciation_hacks: bool = True) -> st
 
     # Step 5: Convert ALL-CAPS common words back to normal case so TTS
     # doesn't spell them out (e.g. "YOU" -> "you", "NOW" -> "now").
-    _KNOWN_ACRONYMS = {"IVR", "OBD", "CLI", "BNG", "DTMF", "USSD", "SMS", "CTA", "AI", "EVA", "INR"}
+    _KNOWN_ACRONYMS = {"IVR", "OBD", "CLI", "BNG", "DTMF", "USSD", "SMS", "CTA", "AI", "INR"}
     def _fix_caps(m: re.Match) -> str:
         word = m.group(0)
         return word if word in _KNOWN_ACRONYMS else word.capitalize()
@@ -161,8 +174,11 @@ LANGUAGE_TO_LOCALE: dict[str, str] = {
     "urdu": "ur-PK", "swahili": "sw-KE", "kiswahili": "sw-KE",
     "amharic": "am-ET", "french": "fr-FR", "arabic": "ar-SA",
     "portuguese": "pt-BR", "indonesian": "id-ID", "filipino": "fil-PH",
-    "somali": "so-SO", "zulu": "zu-ZA", "afrikaans": "en-ZA",
+    "somali": "so-SO",     "zulu": "zu-ZA", "isizulu": "zu-ZA",
+    "afrikaans": "af-ZA",
     "setswana": "en-ZA", "tswana": "en-ZA",
+    "sesotho": "en-ZA", "sotho": "en-ZA",
+    "isixhosa": "en-ZA",
     "haitian creole": "fr-FR", "creolese": "en-US",
     "pidgin english": "en-NG", "pidgin": "en-NG",
     "kinyarwanda": "en-KE", "wolof": "fr-FR",
@@ -250,6 +266,46 @@ EDGE_VOICE_POOL: dict[str, list[tuple[str, str]]] = {
         ("sw-KE-RafikiNeural", "Rafiki (Male)"),
         ("sw-KE-ZuriNeural", "Zuri Alt (Female)"),
     ],
+    "en-ZA": [
+        ("en-ZA-LeahNeural", "Leah (Female)"),
+        ("en-ZA-LukeNeural", "Luke (Male)"),
+        ("en-ZA-LeahNeural", "Leah Alt (Female)"),
+    ],
+    "en-GH": [
+        ("en-GH-EsiNeural", "Esi (Female)"),
+        ("en-GH-EkuaNeural", "Ekua (Male)"),
+        ("en-GH-EsiNeural", "Esi Alt (Female)"),
+    ],
+    "en-TZ": [
+        ("en-TZ-ElimuNeural", "Elimu (Male)"),
+        ("en-TZ-ImaniNeural", "Imani (Female)"),
+        ("en-TZ-ElimuNeural", "Elimu Alt (Male)"),
+    ],
+    "zu-ZA": [
+        ("zu-ZA-ThandoNeural", "Thando (Female)"),
+        ("zu-ZA-ThembaNeural", "Themba (Male)"),
+        ("zu-ZA-ThandoNeural", "Thando Alt (Female)"),
+    ],
+    "af-ZA": [
+        ("af-ZA-AdriNeural", "Adri (Female)"),
+        ("af-ZA-WillemNeural", "Willem (Male)"),
+        ("af-ZA-AdriNeural", "Adri Alt (Female)"),
+    ],
+    "am-ET": [
+        ("am-ET-MekdesNeural", "Mekdes (Female)"),
+        ("am-ET-AmehaNeural", "Ameha (Male)"),
+        ("am-ET-MekdesNeural", "Mekdes Alt (Female)"),
+    ],
+    "so-SO": [
+        ("so-SO-UbaxNeural", "Ubax (Female)"),
+        ("so-SO-MuuseNeural", "Muuse (Male)"),
+        ("so-SO-UbaxNeural", "Ubax Alt (Female)"),
+    ],
+    "fil-PH": [
+        ("fil-PH-BlessicaNeural", "Blessica (Female)"),
+        ("fil-PH-AngeloNeural", "Angelo (Male)"),
+        ("fil-PH-BlessicaNeural", "Blessica Alt (Female)"),
+    ],
 }
 
 MURF_VOICE_POOL: dict[str, list[tuple[str, str, str, str]]] = {
@@ -335,11 +391,20 @@ def _get_murf_voice_pool(country: str, language: str | None) -> list[tuple[str, 
             if lang_key in lang_lower:
                 return pool
 
-    # Country fallback
     lang_for_country = {
-        "India": "english", "Nigeria": "english", "Kenya": "english",
-        "Cameroon": "french", "Senegal": "french", "Mozambique": "portuguese",
-        "Bangladesh": "bengali",
+        "India": "english", "Bangladesh": "bengali",
+        "Nigeria": "english", "Kenya": "english", "Ghana": "english",
+        "Tanzania": "english", "South Africa": "english",
+        "Uganda": "english", "Rwanda": "english", "Zambia": "english",
+        "Zimbabwe": "english", "Botswana": "english", "Ethiopia": "english",
+        "Sierra Leone": "english", "Liberia": "english", "Malawi": "english",
+        "Cameroon": "french", "Senegal": "french", "Congo (DRC)": "french",
+        "Congo (Republic)": "french", "Mali": "french", "Ivory Coast": "french",
+        "Burkina Faso": "french", "Niger": "french", "Guinea": "french",
+        "Benin": "french", "Togo": "french", "Madagascar": "french",
+        "Chad": "french", "Gabon": "french",
+        "Mozambique": "portuguese",
+        "Guyana": "english", "Haiti": "french",
     }
     mapped = lang_for_country.get(country, "english")
     if mapped in MURF_VOICE_POOL:
@@ -940,7 +1005,22 @@ class AudioProducerAgent(BaseAgent):
 
         if len(pool) < 3:
             primary_gender = voice_selection.get("selected_voice", {}).get("gender", "").lower()
+            primary_accent = voice_selection.get("selected_voice", {}).get("accent", "").lower()
+            is_african = country.lower() in {
+                "nigeria", "kenya", "tanzania", "south africa", "ghana",
+                "cameroon", "senegal", "congo (drc)", "congo (republic)",
+                "ethiopia", "mozambique", "rwanda", "uganda", "zambia",
+                "zimbabwe", "botswana", "somalia",
+            }
             female_voices = [
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
+                ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female)"),
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
+                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female)"),
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
+                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+            ] if is_african else [
                 ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
                 ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
                 ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
@@ -948,9 +1028,15 @@ class AudioProducerAgent(BaseAgent):
                 ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
             ]
             male_voices = [
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
+                ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
+                ("nPczCjzI2devNBz1zQrb", "Brian (Male)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
+            ] if is_african else [
                 ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
                 ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
                 ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
             ]
             prefer_opposite = male_voices if primary_gender == "female" else female_voices
             prefer_same = female_voices if primary_gender == "female" else male_voices
@@ -990,12 +1076,12 @@ class AudioProducerAgent(BaseAgent):
 
         if tts_engine_override in ("murf", "elevenlabs", "edge-tts"):
             tts_engine = tts_engine_override
-        elif MURF_API_KEY:
-            tts_engine = "murf"
         elif self._has_elevenlabs_credits():
             has_quota = await self._check_elevenlabs_quota()
             if has_quota:
                 tts_engine = "elevenlabs"
+        elif MURF_API_KEY:
+            tts_engine = "murf"
 
         if tts_engine == "murf":
             if not MURF_API_KEY:

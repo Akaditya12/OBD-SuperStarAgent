@@ -39,6 +39,20 @@ For NON-ENGLISH markets, prefer voices with native-sounding accents (e.g. Indian
 for India, not American English). Pick voices whose labels/description mention the
 target region or accent.
 
+AFRICAN MARKET GUIDANCE (critical -- majority of our client base):
+- For East/Southern African countries (Kenya, Tanzania, Uganda, Rwanda, Zambia, Zimbabwe,
+  Botswana, South Africa), prefer British-accented voices -- these sound more natural and
+  trustworthy for English-speaking African audiences than American accents.
+- For West African countries (Nigeria, Ghana), British or Neutral accents work well.
+  Nigerian Pidgin English content works best with warm, expressive voices.
+- For Francophone Africa (Cameroon, Senegal, Congo DRC/Republic), select French-capable
+  voices. The multilingual_v2 model handles French with any voice.
+- For Swahili-speaking markets, British-accented voices + multilingual_v2 model produce
+  excellent Swahili pronunciation.
+- For any local African language (Yoruba, Igbo, Hausa, Twi, Zulu, Xhosa, Shona, Luganda,
+  Kinyarwanda, Wolof, Lingala, etc.), the eleven_multilingual_v2 model is MANDATORY --
+  it handles these languages far better than other models.
+
 ElevenLabs Voice Settings (PREMIUM tuning for maximum naturalness):
 - stability: 0.30 to 0.40 (more expressive, human-like delivery -- NOT robotic)
 - similarity_boost: 0.75 to 0.85 (high fidelity to voice character)
@@ -96,15 +110,22 @@ Output valid JSON:
 
 
 _CURATED_ELEVENLABS_VOICES: list[dict[str, Any]] = [
+    # Female voices
     {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Soft, warm, friendly female voice with clear enunciation", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
     {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "description": "Calm, confident female voice ideal for narration and promotions", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, engaging female voice with natural delivery", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, engaging female voice with natural delivery, good for multilingual content", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade"},
     {"voice_id": "jsCqWAovK2LkecY7zXl4", "name": "Freya", "description": "Expressive, lively female voice with personality", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined female voice with British accent", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive female voice for diverse content", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative male voice suitable for professional narration", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined female voice with British accent, excellent for East/Southern African markets", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive female voice for diverse content and multilingual campaigns", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy", "description": "Clear, pleasant female voice, warm tone suitable for African and international markets", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice", "description": "Natural, approachable female voice, works well with multilingual v2 for local accents", "labels": {"accent": "British", "gender": "female", "age": "middle-aged"}, "category": "premade"},
+    # Male voices
+    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative male voice suitable for professional narration, British accent matches well with African English", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
     {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "description": "Deep, clear male voice with strong presence", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
-    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy male voice with British accent", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy male voice with British accent, excellent for East/Southern African campaigns", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    {"voice_id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "description": "Confident male voice, clear articulation, works well with multilingual v2 for diverse accents", "labels": {"accent": "American", "gender": "male", "age": "young"}, "category": "premade"},
+    {"voice_id": "nPczCjzI2devNBz1zQrb", "name": "Brian", "description": "Deep, resonant male voice with warmth, good for promotional content across markets", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    {"voice_id": "cjVigY5qzO86Huf0OWal", "name": "Eric", "description": "Friendly, approachable male voice, natural delivery for telecom promotions", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
 ]
 
 
