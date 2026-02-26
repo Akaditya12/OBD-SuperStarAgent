@@ -686,6 +686,11 @@ class AudioProducerAgent(BaseAgent):
                     available = limit - remaining
                     logger.info(f"[{self.name}] ElevenLabs quota: {available} chars remaining")
                     return available > 500
+                if resp.status_code == 401:
+                    detail = resp.json().get("detail", {})
+                    if detail.get("status") == "missing_permissions":
+                        logger.info(f"[{self.name}] ElevenLabs key lacks user_read — assuming quota OK")
+                        return True
         except Exception as e:
             logger.warning(f"[{self.name}] Could not check ElevenLabs quota: {e}")
         return False
@@ -841,14 +846,12 @@ class AudioProducerAgent(BaseAgent):
             "text": clean_text,
             "model_id": effective_model,
             "voice_settings": {
-                "stability": voice_settings.get("stability", 0.5),
-                "similarity_boost": voice_settings.get("similarity_boost", 0.75),
+                "stability": voice_settings.get("stability", 0.35),
+                "similarity_boost": voice_settings.get("similarity_boost", 0.80),
+                "style": voice_settings.get("style", 0.45),
                 "use_speaker_boost": True,
             },
         }
-        style_val = voice_settings.get("style")
-        if style_val is not None:
-            payload["voice_settings"]["style"] = float(style_val)
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -895,6 +898,9 @@ class AudioProducerAgent(BaseAgent):
                     params={"page_size": 100},
                     timeout=15.0,
                 )
+                if response.status_code == 401:
+                    logger.info(f"[{self.name}] Voices API restricted — trusting voice_id {voice_id}")
+                    return voice_id
                 response.raise_for_status()
                 voices = response.json().get("voices", [])
                 valid_ids = {v["voice_id"] for v in voices}
@@ -908,6 +914,55 @@ class AudioProducerAgent(BaseAgent):
         except Exception as e:
             logger.error(f"[{self.name}] Voice validation failed: {e}")
         return voice_id
+
+    async def _build_elevenlabs_voice_pool(
+        self,
+        primary_voice_id: str,
+        primary_name: str,
+        voice_selection: dict[str, Any],
+        country: str,
+        language: str | None,
+    ) -> list[tuple[str, str]]:
+        """Build a pool of 3 diverse ElevenLabs voices.
+
+        Uses LLM-selected alternatives first, then fills from a curated
+        list of known-good premium voices with gender diversity.
+        """
+        pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
+        seen_ids = {primary_voice_id}
+
+        alt_voices = voice_selection.get("alternative_voices", [])
+        for av in alt_voices[:2]:
+            avid = av.get("voice_id", "")
+            if avid and avid not in seen_ids:
+                pool.append((avid, av.get("name", "Alt")))
+                seen_ids.add(avid)
+
+        if len(pool) < 3:
+            primary_gender = voice_selection.get("selected_voice", {}).get("gender", "").lower()
+            female_voices = [
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
+                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
+                ("jsCqWAovK2LkecY7zXl4", "Freya (Female)"),
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
+            ]
+            male_voices = [
+                ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
+                ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
+            ]
+            prefer_opposite = male_voices if primary_gender == "female" else female_voices
+            prefer_same = female_voices if primary_gender == "female" else male_voices
+            for vid, lbl in prefer_opposite + prefer_same:
+                if vid not in seen_ids and len(pool) < 3:
+                    pool.append((vid, lbl))
+                    seen_ids.add(vid)
+
+        logger.info(f"[{self.name}] ElevenLabs voice pool: {[p[1] for p in pool]}")
+        while len(pool) < 3:
+            pool.append(pool[0])
+        return pool[:3]
 
     async def _resolve_engine(
         self,
@@ -979,12 +1034,9 @@ class AudioProducerAgent(BaseAgent):
             for eid, lbl in _get_edge_voice_pool(country, language):
                 voice_pool.append({"edge_voice": eid, "voice_label": lbl})
         else:
-            alt_voices = voice_selection.get("alternative_voices", [])
-            el_pool = [(el_voice_id, voice_name)]
-            for av in alt_voices[:2]:
-                el_pool.append((av.get("voice_id", el_voice_id), av.get("name", "Alt")))
-            while len(el_pool) < 3:
-                el_pool.append(el_pool[0])
+            el_pool = await self._build_elevenlabs_voice_pool(
+                el_voice_id, voice_name, voice_selection, country, language,
+            )
             for eid, lbl in el_pool:
                 voice_pool.append({"el_voice_id": eid, "voice_label": lbl})
 

@@ -26,7 +26,7 @@ DEFAULT_LLM_PROVIDER = _env("DEFAULT_LLM_PROVIDER", "azure_openai")
 ELEVENLABS_API_KEY = _env("ELEVENLABS_API_KEY")
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
 ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
-ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
+ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_192"
 
 # --- Murf AI Configuration ---
 MURF_API_KEY = _env("MURF_API_KEY")

@@ -28,18 +28,21 @@ You will be given:
 Your job is to select the BEST voice for this OBD campaign and configure the \
 optimal ElevenLabs V3 parameters.
 
-Consider:
-- Voice gender, age, and tone that matches the target audience
-- Accent and language compatibility
-- Emotional range needed for the scripts (the voice must handle audio tags well)
-- Cultural appropriateness
-- Warmth, trustworthiness, and engagement quality
+CRITICAL SELECTION CRITERIA (in order of importance):
+1. Accent and language match -- voice MUST sound natural for the target market
+2. Warmth, trustworthiness, and clarity -- OBD calls need instant listener engagement
+3. Emotional range -- voice must handle varied tones (curious, excited, warm, urgent)
+4. Gender and age fit for the target demographic
+5. Prefer "professional" or "high_quality" category voices over "premade" when available
 
-ElevenLabs V3 Voice Settings:
-- stability: 0.0 to 1.0 (lower = more expressive/creative, higher = more consistent)
-  * For OBD with audio tags, recommend 0.3-0.5 (Creative to Natural range)
-- similarity_boost: 0.0 to 1.0 (how close to the original voice)
-- style: 0.0 to 1.0 (style exaggeration, higher = more expressive)
+For NON-ENGLISH markets, prefer voices with native-sounding accents (e.g. Indian English
+for India, not American English). Pick voices whose labels/description mention the
+target region or accent.
+
+ElevenLabs Voice Settings (PREMIUM tuning for maximum naturalness):
+- stability: 0.30 to 0.40 (more expressive, human-like delivery -- NOT robotic)
+- similarity_boost: 0.75 to 0.85 (high fidelity to voice character)
+- style: 0.40 to 0.55 (moderate expressiveness for promotional punch)
 - speed: 0.7 to 1.2 (speech speed, 1.0 = normal)
 
 ElevenLabs Model IDs (MUST use one of these):
@@ -90,6 +93,19 @@ Output valid JSON:
   "audio_production_notes": "string - tips for best results with this voice and these scripts"
 }\
 """
+
+
+_CURATED_ELEVENLABS_VOICES: list[dict[str, Any]] = [
+    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Soft, warm, friendly female voice with clear enunciation", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "description": "Calm, confident female voice ideal for narration and promotions", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, engaging female voice with natural delivery", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "jsCqWAovK2LkecY7zXl4", "name": "Freya", "description": "Expressive, lively female voice with personality", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined female voice with British accent", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive female voice for diverse content", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
+    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative male voice suitable for professional narration", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "description": "Deep, clear male voice with strong presence", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy male voice with British accent", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+]
 
 
 class VoiceSelectorAgent(BaseAgent):
@@ -153,24 +169,8 @@ class VoiceSelectorAgent(BaseAgent):
         try:
             available_voices = await self._fetch_available_voices()
         except Exception as e:
-            logger.error(f"[{self.name}] Failed to fetch voices: {e}")
-            # Provide a fallback with a known good multilingual voice
-            available_voices = [
-                {
-                    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
-                    "name": "George",
-                    "description": "Warm, clear male voice suitable for narration",
-                    "labels": {"accent": "British", "gender": "male", "age": "middle-aged"},
-                    "category": "premade",
-                },
-                {
-                    "voice_id": "EXAVITQu4vr4xnSDxMaL",
-                    "name": "Sarah",
-                    "description": "Soft, friendly female voice",
-                    "labels": {"accent": "American", "gender": "female", "age": "young"},
-                    "category": "premade",
-                },
-            ]
+            logger.warning(f"[{self.name}] Could not fetch voices from API: {e}")
+            available_voices = _CURATED_ELEVENLABS_VOICES
 
         # Determine language from scripts or market analysis
         if not language:
