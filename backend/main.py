@@ -34,6 +34,8 @@ from backend.database import (
     save_comment,
     list_comments,
     delete_comment,
+    get_pipeline_config,
+    save_pipeline_config,
 )
 from backend.collaboration import (
     register_user,
@@ -464,6 +466,22 @@ async def _periodic_cleanup():
             _cleanup_outputs(max_age_hours=2)
         except Exception as e:
             logger.error(f"Periodic cleanup failed: {e}")
+
+
+@app.get("/api/admin/config")
+async def get_config():
+    """Return pipeline configuration (admin only)."""
+    return get_pipeline_config()
+
+
+@app.put("/api/admin/config")
+async def update_config(request: Request):
+    """Update pipeline configuration keys (admin only)."""
+    body = await request.json()
+    user = getattr(request.state, "user", {})
+    updated_by = user.get("username", "admin") if isinstance(user, dict) else "admin"
+    config = save_pipeline_config(body, updated_by=updated_by)
+    return config
 
 
 @app.on_event("startup")

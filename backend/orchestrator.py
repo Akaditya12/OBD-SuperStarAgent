@@ -16,7 +16,7 @@ from backend.agents import (
     ScriptWriterAgent,
     VoiceSelectorAgent,
 )
-from backend.config import ELEVENLABS_API_KEY, EVAL_FEEDBACK_ROUNDS
+from backend.config import ELEVENLABS_API_KEY, EVAL_FEEDBACK_ROUNDS, get_live_config
 from backend.database import get_cached_analysis, save_analysis_cache
 
 logger = logging.getLogger(__name__)
@@ -184,9 +184,11 @@ class PipelineOrchestrator:
             })
 
             # ── Step 4 & 5: Evaluation + Revision Loop ──
+            live_cfg = get_live_config()
+            eval_rounds = live_cfg.get("eval_feedback_rounds", EVAL_FEEDBACK_ROUNDS)
             final_scripts = scripts
-            for round_num in range(EVAL_FEEDBACK_ROUNDS):
-                round_label = f"(round {round_num + 1}/{EVAL_FEEDBACK_ROUNDS})"
+            for round_num in range(eval_rounds):
+                round_label = f"(round {round_num + 1}/{eval_rounds})"
 
                 # Evaluate
                 await self.on_progress("EvalPanel", "started", {

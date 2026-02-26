@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Any
 
-from backend.config import MAX_SCRIPT_WORDS, NUM_SCRIPT_VARIANTS
+from backend.config import MAX_SCRIPT_WORDS, NUM_SCRIPT_VARIANTS, get_live_config
 
 from .base import BaseAgent
 
@@ -160,13 +160,17 @@ class ScriptWriterAgent(BaseAgent):
         language_override: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        cfg = get_live_config()
+        max_words = cfg.get("max_script_words", MAX_SCRIPT_WORDS)
+        num_variants = cfg.get("num_script_variants", NUM_SCRIPT_VARIANTS)
+
         is_revision = feedback is not None and previous_scripts is not None
         if is_revision:
             logger.info(f"[{self.name}] Revising scripts based on evaluation feedback")
-            return await self._revise(product_brief, market_analysis, feedback, previous_scripts, language_override)
+            return await self._revise(product_brief, market_analysis, feedback, previous_scripts, language_override, max_words=max_words, num_variants=num_variants)
         else:
-            logger.info(f"[{self.name}] Generating {NUM_SCRIPT_VARIANTS} new script variants (lang={language_override})")
-            return await self._generate(product_brief, market_analysis, language_override)
+            logger.info(f"[{self.name}] Generating {num_variants} new script variants (lang={language_override})")
+            return await self._generate(product_brief, market_analysis, language_override, max_words=max_words, num_variants=num_variants)
 
     async def _generate_batch(
         self,
@@ -175,6 +179,7 @@ class ScriptWriterAgent(BaseAgent):
         angles: list[str],
         start_id: int,
         language_override: str | None = None,
+        max_words: int = MAX_SCRIPT_WORDS,
     ) -> list[dict[str, Any]]:
         """Generate a small batch of script variants (2-3 at a time)."""
         angle_list = ", ".join(angles)
@@ -200,7 +205,7 @@ MARKET:
 {market_summary}{lang_instruction}
 
 Each variant needs its specified creative angle. Embed ElevenLabs V3 audio tags in every field. \
-Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" array of {count} objects.\
+Under {max_words} words per script. Output valid JSON with "scripts" array of {count} objects.\
 """
 
         response = await self.call_llm(
@@ -218,14 +223,15 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         product_brief: dict[str, Any],
         market_analysis: dict[str, Any],
         language_override: str | None = None,
+        max_words: int = MAX_SCRIPT_WORDS,
+        num_variants: int = NUM_SCRIPT_VARIANTS,
     ) -> dict[str, Any]:
         """Generate scripts in parallel batches to avoid LLM output-length limits."""
         brief_summary = _summarize_brief(product_brief)
         market_summary = _summarize_market(market_analysis)
 
-        angles = CREATIVE_ANGLES[:NUM_SCRIPT_VARIANTS]
+        angles = CREATIVE_ANGLES[:num_variants]
 
-        # Split into batches of 2
         batches: list[tuple[list[str], int]] = []
         for i in range(0, len(angles), 2):
             batch_angles = angles[i:i + 2]
@@ -237,7 +243,7 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         )
 
         tasks = [
-            self._generate_batch(brief_summary, market_summary, batch_angles, start_id, language_override)
+            self._generate_batch(brief_summary, market_summary, batch_angles, start_id, language_override, max_words=max_words)
             for batch_angles, start_id in batches
         ]
         batch_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -248,7 +254,7 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
                 logger.warning(f"[{self.name}] Batch {i+1} failed: {res} -- retrying once")
                 try:
                     retry = await self._generate_batch(
-                        brief_summary, market_summary, batches[i][0], batches[i][1], language_override
+                        brief_summary, market_summary, batches[i][0], batches[i][1], language_override, max_words=max_words
                     )
                     all_scripts.extend(retry)
                 except Exception as retry_err:
@@ -256,15 +262,14 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
             else:
                 all_scripts.extend(res)
 
-        # Re-number variant IDs sequentially (always 1-based)
         for idx, script in enumerate(all_scripts):
             script["variant_id"] = idx + 1
 
         logger.info(f"[{self.name}] Total scripts generated: {len(all_scripts)}")
 
-        if len(all_scripts) < NUM_SCRIPT_VARIANTS:
+        if len(all_scripts) < num_variants:
             logger.warning(
-                f"[{self.name}] Only {len(all_scripts)}/{NUM_SCRIPT_VARIANTS} variants generated. "
+                f"[{self.name}] Only {len(all_scripts)}/{num_variants} variants generated. "
                 f"Some batches may have failed."
             )
 
@@ -284,6 +289,8 @@ Under {MAX_SCRIPT_WORDS} words per script. Output valid JSON with "scripts" arra
         feedback: dict[str, Any],
         previous_scripts: dict[str, Any],
         language_override: str | None = None,
+        max_words: int = MAX_SCRIPT_WORDS,
+        num_variants: int = NUM_SCRIPT_VARIANTS,
     ) -> dict[str, Any]:
         """Revise scripts in parallel batches based on evaluation feedback."""
         consensus = feedback.get("consensus", {})
@@ -322,7 +329,7 @@ FEEDBACK:
 {feedback_text}{lang_instruction}
 
 Return ALL {count} revised variants. Keep each variant's unique theme. \
-Embed ElevenLabs V3 audio tags. Under {MAX_SCRIPT_WORDS} words per script. \
+Embed ElevenLabs V3 audio tags. Under {max_words} words per script. \
 Output valid JSON with "scripts" array of {count} objects.\
 """
             response = await self.call_llm(

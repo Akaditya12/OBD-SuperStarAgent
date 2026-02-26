@@ -343,3 +343,48 @@ def save_analysis_cache(
             logger.info("Saved analysis cache for key %s", cache_key)
         except Exception as e:
             logger.warning("Failed to save analysis cache: %s", e)
+
+
+# ── App Config (Pipeline Settings) ────────────────────────────────────────────
+
+_PIPELINE_DEFAULTS: dict[str, Any] = {
+    "max_script_words": 75,
+    "num_script_variants": 5,
+    "eval_feedback_rounds": 1,
+    "elevenlabs_tts_model": "eleven_multilingual_v2",
+    "elevenlabs_output_format": "mp3_44100_192",
+    "voice_stability": 0.35,
+    "voice_similarity_boost": 0.80,
+    "voice_style": 0.45,
+    "bgm_volume_db": -26,
+    "bgm_default_style": "upbeat",
+    "default_tts_engine": "elevenlabs",
+}
+
+
+def get_pipeline_config() -> dict[str, Any]:
+    """Return full pipeline config, merging DB overrides over defaults."""
+    config = dict(_PIPELINE_DEFAULTS)
+    if supabase:
+        try:
+            resp = supabase.table("app_config").select("*").execute()
+            for row in resp.data or []:
+                config[row["key"]] = row["value"]
+        except Exception as e:
+            logger.warning("Failed to load pipeline config: %s", e)
+    return config
+
+
+def save_pipeline_config(updates: dict[str, Any], updated_by: str = "admin") -> dict[str, Any]:
+    """Upsert one or more pipeline config keys."""
+    if supabase:
+        for key, value in updates.items():
+            try:
+                supabase.table("app_config").upsert({
+                    "key": key,
+                    "value": value,
+                    "updated_by": updated_by,
+                }).execute()
+            except Exception as e:
+                logger.warning("Failed to save config key '%s': %s", key, e)
+    return get_pipeline_config()

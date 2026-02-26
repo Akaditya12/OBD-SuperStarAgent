@@ -40,6 +40,15 @@ EVAL_FEEDBACK_ROUNDS = 1  # Number of revision cycles between Writer and Eval Pa
 NUM_SCRIPT_VARIANTS = 5  # Number of script sets to generate
 NUM_FALLBACKS_PER_SCRIPT = 2  # Fallback CTA variants per script
 
+
+def get_live_config() -> dict:
+    """Return pipeline config merged from DB overrides + code defaults.
+
+    Lazy-imports database to avoid circular dependencies.
+    """
+    from backend.database import get_pipeline_config
+    return get_pipeline_config()
+
 # --- Supabase Configuration ---
 SUPABASE_URL = _env("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = _env("SUPABASE_SERVICE_KEY")

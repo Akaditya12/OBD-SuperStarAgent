@@ -907,13 +907,15 @@ class AudioProducerAgent(BaseAgent):
         url = f"{ELEVENLABS_BASE_URL}/v1/text-to-speech/{voice_id}"
         clean_text = _clean_text_for_tts(text)
 
+        from backend.config import get_live_config
+        live = get_live_config()
         payload: dict[str, Any] = {
             "text": clean_text,
             "model_id": effective_model,
             "voice_settings": {
-                "stability": voice_settings.get("stability", 0.35),
-                "similarity_boost": voice_settings.get("similarity_boost", 0.80),
-                "style": voice_settings.get("style", 0.45),
+                "stability": voice_settings.get("stability", live.get("voice_stability", 0.35)),
+                "similarity_boost": voice_settings.get("similarity_boost", live.get("voice_similarity_boost", 0.80)),
+                "style": voice_settings.get("style", live.get("voice_style", 0.45)),
                 "use_speaker_boost": True,
             },
         }
