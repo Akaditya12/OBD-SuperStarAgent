@@ -84,13 +84,18 @@ def save_campaign(
     telco: str,
     language: str,
     result: dict[str, Any],
-    team: str = "default",  # Optional param for future use
+    team: str = "default",
 ) -> dict[str, Any]:
     """Save a campaign to the database. Returns the saved campaign summary."""
-    final_scripts = result.get("final_scripts", result.get("revised_scripts_round_1", result.get("initial_scripts", {})))
-    scripts = final_scripts.get("scripts", [])
-    script_count = len(scripts)
-    audio_files = result.get("audio", {}).get("audio_files", [])
+    is_stv = result.get("campaign_type") == "script_to_voice"
+    if is_stv:
+        script_count = 1
+        audio_files = result.get("audio", {}).get("audio_files", [])
+    else:
+        final_scripts = result.get("final_scripts", result.get("revised_scripts_round_1", result.get("initial_scripts", {})))
+        scripts = final_scripts.get("scripts", [])
+        script_count = len(scripts)
+        audio_files = result.get("audio", {}).get("audio_files", [])
     has_audio = 1 if any(not f.get("error") for f in audio_files) else 0
 
     now = datetime.now(timezone.utc).isoformat()

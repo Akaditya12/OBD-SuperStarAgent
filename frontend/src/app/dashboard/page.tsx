@@ -13,11 +13,17 @@ import {
   Search,
   Loader2,
   Calendar,
+  AudioLines,
+  Mic2,
+  Pause,
+  Languages,
+  Copy,
 } from "lucide-react";
 import StatsCards from "@/components/StatsCards";
 import CommentThread from "@/components/CommentThread";
 import ActivityFeed from "@/components/ActivityFeed";
 import { useToast } from "@/components/ToastProvider";
+import { forceDownload } from "@/lib/utils";
 import type {
   Campaign,
   CampaignDetail,
@@ -53,6 +59,11 @@ export default function DashboardPage() {
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Translation
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translatingKey, setTranslatingKey] = useState<string | null>(null);
+  const [showTranslation, setShowTranslation] = useState<Record<string, boolean>>({});
+
   // ── Auth Check ──
   useEffect(() => {
     fetch("/api/auth/me")
@@ -68,27 +79,37 @@ export default function DashboardPage() {
       .catch(() => setAuthChecked(true));
   }, [router]);
 
-  // ── Load campaigns ──
-  const loadCampaigns = useCallback(async () => {
-    try {
-      const res = await fetch("/api/campaigns");
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(data.campaigns || []);
+  // ── Load campaigns (only after auth is confirmed) ──
+  const loadCampaigns = useCallback(async (retries = 2) => {
+    setLoading(true);
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch("/api/campaigns");
+        if (res.ok) {
+          const data = await res.json();
+          setCampaigns(data.campaigns || []);
+          setLoading(false);
+          return;
+        }
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+        }
+      } catch {
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+        }
       }
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    loadCampaigns();
-  }, [loadCampaigns]);
+    if (authChecked) loadCampaigns();
+  }, [authChecked, loadCampaigns]);
 
-  // ── Load activity feed ──
+  // ── Load activity feed (only after auth is confirmed) ──
   useEffect(() => {
+    if (!authChecked) return;
     const fetchActivity = async () => {
       try {
         const res = await fetch("/api/activity?limit=15");
@@ -101,7 +122,7 @@ export default function DashboardPage() {
     fetchActivity();
     const interval = setInterval(fetchActivity, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [authChecked]);
 
   // ── Toggle expand / collaboration WS ──
   const toggleExpand = async (id: string) => {
@@ -213,6 +234,30 @@ export default function DashboardPage() {
     }
   };
 
+  // ── Translation ──
+  const handleTranslate = async (key: string, text: string, lang: string) => {
+    if (translations[key]) {
+      setShowTranslation((prev) => ({ ...prev, [key]: !prev[key] }));
+      return;
+    }
+    setTranslatingKey(key);
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, source_language: lang }),
+      });
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      setTranslations((prev) => ({ ...prev, [key]: data.translated }));
+      setShowTranslation((prev) => ({ ...prev, [key]: true }));
+    } catch {
+      toast("error", "Translation failed. Please try again.");
+    } finally {
+      setTranslatingKey(null);
+    }
+  };
+
   // ── Audio ──
   const toggleAudio = (url: string) => {
     if (playingAudio === url) {
@@ -260,6 +305,7 @@ export default function DashboardPage() {
     0
   );
 
+  const isStv = (detail?.result as unknown as Record<string, unknown>)?.campaign_type === "script_to_voice";
   const scripts =
     detail?.result?.final_scripts?.scripts ||
     detail?.result?.revised_scripts_round_1?.scripts ||
@@ -365,6 +411,12 @@ export default function DashboardPage() {
                           <h3 className="text-sm font-semibold text-[var(--text-primary)] truncate">
                             {campaign.name}
                           </h3>
+                          {!campaign.telco && campaign.has_audio && campaign.script_count <= 1 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-500 font-medium border border-violet-500/20 shrink-0">
+                              <Mic2 className="w-2.5 h-2.5" />
+                              Script to Voice
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                           {campaign.country && (
@@ -413,6 +465,116 @@ export default function DashboardPage() {
                           </div>
                         ) : detail ? (
                           <div className="space-y-3 mt-4">
+                            {/* ── STV Campaign Detail ── */}
+                            {isStv ? (() => {
+                              const stvResult = detail.result as unknown as Record<string, unknown>;
+                              const stvScript = (stvResult.script_text || "") as string;
+                              const stvVoice = (stvResult.voice_name || "") as string;
+                              const stvEngine = (stvResult.tts_engine || "") as string;
+                              const stvBgm = (stvResult.bgm_style || "none") as string;
+                              const stvFormat = (stvResult.audio_format || "mp3") as string;
+                              const stvAudioFiles = ((stvResult.audio as Record<string, unknown>)?.audio_files || []) as AudioFile[];
+                              const stvSessionId = (stvResult.session_id || detail.result?.session_id || campaign.id) as string;
+                              const engineLabel = stvEngine === "elevenlabs" ? "ElevenLabs" : stvEngine === "murf" ? "Murf AI" : stvEngine === "edge-tts" ? "Edge TTS" : stvEngine;
+
+                              return (
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between pb-3 border-b border-[var(--card-border)]">
+                                    <div className="flex items-center gap-2">
+                                      <AudioLines className="w-4 h-4 text-violet-500" />
+                                      <h4 className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-semibold">
+                                        Script to Voice
+                                      </h4>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
+                                      {stvVoice && <span>Voice: <span className="text-[var(--text-secondary)] font-medium">{stvVoice}</span></span>}
+                                      {engineLabel && <span className="px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-500 font-medium">{engineLabel}</span>}
+                                      {stvBgm !== "none" && <span>BGM: {stvBgm}</span>}
+                                      <span className="uppercase font-medium">{stvFormat}</span>
+                                    </div>
+                                  </div>
+
+                                  {stvAudioFiles.length > 0 && (
+                                    <div className="flex items-center gap-4 p-4 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)]">
+                                      {stvAudioFiles.map((af: AudioFile, ai: number) => {
+                                        const audioUrl = af.public_url || `/api/audio/${stvSessionId}/${af.file_name}`;
+                                        const isPlaying = playingAudio === audioUrl;
+                                        return (
+                                          <div key={ai} className="flex items-center gap-3 flex-1">
+                                            <button
+                                              onClick={() => toggleAudio(audioUrl)}
+                                              className={`p-2.5 rounded-xl transition-all ${
+                                                isPlaying
+                                                  ? "bg-[var(--accent)] text-white"
+                                                  : "bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white"
+                                              }`}
+                                            >
+                                              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                            </button>
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-medium text-[var(--text-primary)]">{stvVoice || "Audio"}</p>
+                                              <p className="text-[10px] text-[var(--text-tertiary)]">{af.file_name}</p>
+                                            </div>
+                                            <button
+                                              onClick={() => forceDownload(audioUrl, af.file_name || `audio.${stvFormat}`)}
+                                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium text-[var(--accent)] bg-[var(--accent-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all border border-[var(--accent)]/20"
+                                            >
+                                              <Download className="w-3 h-3" />
+                                              Download
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {stvScript && (
+                                    <div className="p-4 rounded-xl bg-[var(--background)] border border-[var(--card-border)] space-y-3">
+                                      <h5 className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-semibold">Script</h5>
+                                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+                                        {stvScript}
+                                      </p>
+                                      {campaign.language && !campaign.language.toLowerCase().startsWith("english") && (
+                                        <>
+                                          <button
+                                            onClick={() => handleTranslate(`stv_${campaign.id}`, stvScript, campaign.language)}
+                                            disabled={translatingKey === `stv_${campaign.id}`}
+                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                                              showTranslation[`stv_${campaign.id}`]
+                                                ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                                                : "text-[var(--text-secondary)] hover:text-blue-400 hover:bg-blue-500/10 border border-[var(--card-border)] hover:border-blue-500/30"
+                                            }`}
+                                          >
+                                            {translatingKey === `stv_${campaign.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3" />}
+                                            {translatingKey === `stv_${campaign.id}` ? "Translating..." : showTranslation[`stv_${campaign.id}`] ? "Hide Translation" : "Translate to English"}
+                                          </button>
+                                          {showTranslation[`stv_${campaign.id}`] && translations[`stv_${campaign.id}`] && (
+                                            <div className="p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                                              <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
+                                                  <Languages className="w-2.5 h-2.5" />
+                                                  English Translation
+                                                </span>
+                                                <button
+                                                  onClick={() => { navigator.clipboard.writeText(translations[`stv_${campaign.id}`]); toast("info", "Translation copied"); }}
+                                                  className="p-0.5 rounded hover:bg-blue-500/10 text-blue-400/60 hover:text-blue-400 transition-colors"
+                                                >
+                                                  <Copy className="w-2.5 h-2.5" />
+                                                </button>
+                                              </div>
+                                              <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                                                {translations[`stv_${campaign.id}`]}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })() : (
+                            <>
                             {/* Global session actions */}
                             <div className="flex items-center justify-between pb-3 border-b border-[var(--card-border)] mb-4">
                               <h4 className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-semibold">
@@ -486,6 +648,47 @@ export default function DashboardPage() {
                                         </p>
                                       )}
 
+                                      {/* Translate button */}
+                                      {script.language && !script.language.toLowerCase().startsWith("english") && (
+                                        <div className="mb-3 space-y-2">
+                                          <button
+                                            onClick={() => handleTranslate(`${campaign.id}_v${vid}`, script.full_script || `${script.hook}\n${script.body}\n${script.cta}`, script.language)}
+                                            disabled={translatingKey === `${campaign.id}_v${vid}`}
+                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                                              showTranslation[`${campaign.id}_v${vid}`]
+                                                ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                                                : "text-[var(--text-secondary)] hover:text-blue-400 hover:bg-blue-500/10 border border-[var(--card-border)] hover:border-blue-500/30"
+                                            }`}
+                                          >
+                                            {translatingKey === `${campaign.id}_v${vid}` ? (
+                                              <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                              <Languages className="w-3 h-3" />
+                                            )}
+                                            {translatingKey === `${campaign.id}_v${vid}` ? "Translating..." : showTranslation[`${campaign.id}_v${vid}`] ? "Hide Translation" : "Translate to English"}
+                                          </button>
+                                          {showTranslation[`${campaign.id}_v${vid}`] && translations[`${campaign.id}_v${vid}`] && (
+                                            <div className="p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                                              <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
+                                                  <Languages className="w-2.5 h-2.5" />
+                                                  English Translation
+                                                </span>
+                                                <button
+                                                  onClick={() => { navigator.clipboard.writeText(translations[`${campaign.id}_v${vid}`]); toast("info", "Translation copied"); }}
+                                                  className="p-0.5 rounded hover:bg-blue-500/10 text-blue-400/60 hover:text-blue-400 transition-colors"
+                                                >
+                                                  <Copy className="w-2.5 h-2.5" />
+                                                </button>
+                                              </div>
+                                              <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                                                {translations[`${campaign.id}_v${vid}`]}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+
                                       {/* Audio controls inline */}
                                       {variantAudio.length > 0 && (
                                         <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
@@ -505,13 +708,12 @@ export default function DashboardPage() {
                                                   <Play className={`w-2.5 h-2.5 ${isPlaying ? "animate-pulse" : ""}`} />
                                                   {label}
                                                 </button>
-                                                <a
-                                                  href={audioUrl}
-                                                  download
+                                                <button
+                                                  onClick={() => forceDownload(audioUrl, af.file_name || "audio.mp3")}
                                                   className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
                                                 >
                                                   <Download className="w-2.5 h-2.5" />
-                                                </a>
+                                                </button>
                                               </div>
                                             );
                                           })}
@@ -521,6 +723,8 @@ export default function DashboardPage() {
                                   );
                                 })}
                               </div>
+                            )}
+                            </>
                             )}
 
                             {/* Comments */}

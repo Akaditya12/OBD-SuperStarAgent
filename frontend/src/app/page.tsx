@@ -41,7 +41,8 @@ import type {
   HookPreviewResult,
   AudioResult,
 } from "@/lib/types";
-import { Music, Radio, Upload, VolumeX } from "lucide-react";
+import { Languages, Music, Radio, Upload, VolumeX } from "lucide-react";
+import { forceDownload } from "@/lib/utils";
 
 type WizardStep = "input" | "running" | "results";
 
@@ -129,6 +130,11 @@ function HomePageContent() {
 
   // Audio regeneration
   const [regenVariant, setRegenVariant] = useState<number | null>(null);
+
+  // Translation
+  const [translations, setTranslations] = useState<Record<number, string>>({});
+  const [translatingVariant, setTranslatingVariant] = useState<number | null>(null);
+  const [showTranslation, setShowTranslation] = useState<Record<number, boolean>>({});
 
   // Hook preview voice selection & full audio generation
   const [voiceChoices, setVoiceChoices] = useState<Record<number, number>>({});
@@ -405,6 +411,32 @@ function HomePageContent() {
     setTimeout(() => setCopiedScript(null), 2000);
   };
 
+  // ── Script translation ──
+  const handleTranslate = async (script: Script) => {
+    const vid = script.variant_id;
+    if (translations[vid]) {
+      setShowTranslation((prev) => ({ ...prev, [vid]: !prev[vid] }));
+      return;
+    }
+    setTranslatingVariant(vid);
+    try {
+      const text = script.full_script || `${script.hook}\n${script.body}\n${script.cta}`;
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, source_language: script.language }),
+      });
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      setTranslations((prev) => ({ ...prev, [vid]: data.translated }));
+      setShowTranslation((prev) => ({ ...prev, [vid]: true }));
+    } catch {
+      toast("error", "Translation failed. Please try again.");
+    } finally {
+      setTranslatingVariant(null);
+    }
+  };
+
   // ── Script editing ──
   const startEditing = (script: Script) => {
     const vid = script.variant_id;
@@ -587,6 +619,9 @@ function HomePageContent() {
               const audioResult: AudioResult = job.audio;
               setResult((prev) => prev ? { ...prev, audio: audioResult } : prev);
               toast("success", `Generated ${audioResult.summary?.total_generated || 0} final audio files!`);
+              if (saved) {
+                toast("info", "Dashboard campaign updated with audio");
+              }
               return;
             }
             if (job.status === "error") {
@@ -610,8 +645,23 @@ function HomePageContent() {
     setWizardStep("input");
     setResult(null);
     setError("");
+
+    // Form defaults
+    setSelectedProduct("eva");
+    setProductText(BNG_PRODUCTS[0].fullDescription);
+    setFileName("");
+    setCountry("");
+    setTelco("");
+    setLanguage("");
+    setPromotionType("obd_standard");
+    setTtsEngine("auto");
+    setForceReanalyze(false);
+
+    // Save state
     setSaved(false);
     setCampaignName("");
+
+    // Audio / BGM
     setVoiceChoices({});
     setBgmStyle("upbeat");
     setAudioFormat("mp3");
@@ -619,7 +669,24 @@ function HomePageContent() {
     setBgmPreviewPlaying(null);
     setCustomBgmId("");
     setCustomBgmName("");
+    setUploadingBgm(false);
     if (bgmAudioRef.current) bgmAudioRef.current.pause();
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setPlayingAudio(null);
+    setLoadingAudio(null);
+
+    // Script editing & translation
+    setExpandedScript(null);
+    setCopiedScript(null);
+    setEditingVariant(null);
+    setEditDraft({});
+    setEditedVariants(new Set());
+    setRegenVariant(null);
+    setTranslations({});
+    setTranslatingVariant(null);
+    setShowTranslation({});
+
+    // Pipeline
     setProgressSteps(
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
@@ -1033,7 +1100,48 @@ function HomePageContent() {
                               Re-generate Audio
                             </button>
                           )}
+                          {!isEditing && script.language && !script.language.toLowerCase().startsWith("english") && (
+                            <button
+                              onClick={() => handleTranslate(script)}
+                              disabled={translatingVariant === vid}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                showTranslation[vid]
+                                  ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                                  : "text-[var(--text-secondary)] hover:text-blue-400 hover:bg-blue-500/10 border border-[var(--card-border)] hover:border-blue-500/30"
+                              }`}
+                            >
+                              {translatingVariant === vid ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Languages className="w-3 h-3" />
+                              )}
+                              {translatingVariant === vid ? "Translating..." : showTranslation[vid] ? "Hide Translation" : "Translate to English"}
+                            </button>
+                          )}
                         </div>
+
+                        {showTranslation[vid] && translations[vid] && (
+                          <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
+                                <Languages className="w-3 h-3" />
+                                English Translation
+                              </span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(translations[vid]);
+                                  toast("info", "Translation copied");
+                                }}
+                                className="p-1 rounded hover:bg-blue-500/10 text-blue-400/60 hover:text-blue-400 transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                              {translations[vid]}
+                            </p>
+                          </div>
+                        )}
 
                         {SECTIONS.map((section) => {
                           const value = isEditing ? (editDraft[section] ?? "") : (script[section] || "");
@@ -1391,13 +1499,12 @@ function HomePageContent() {
                                           </p>
                                         )}
                                       </div>
-                                      <a
-                                        href={audioUrl}
-                                        download
+                                      <button
+                                        onClick={() => forceDownload(audioUrl, af.file_name || "audio.mp3")}
                                         className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--card)] transition-colors"
                                       >
                                         <Download className="w-3 h-3" />
-                                      </a>
+                                      </button>
                                     </div>
                                   );
                                 })}

@@ -16,8 +16,11 @@ import {
   Mic2,
   RefreshCw,
   AlertCircle,
+  Save,
+  Check,
 } from "lucide-react";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
+import { forceDownload } from "@/lib/utils";
 
 type Step = "input" | "previews" | "result";
 
@@ -90,6 +93,11 @@ export default function ScriptToVoicePage() {
     voice_name: string;
     duration?: number;
   } | null>(null);
+
+  // Save state
+  const [saveName, setSaveName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // Audio playback
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -257,6 +265,37 @@ export default function ScriptToVoicePage() {
     }
   };
 
+  const handleSave = async () => {
+    if (!saveName.trim() || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/script-to-voice/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          name: saveName.trim(),
+          script_text: scriptText,
+          voice_name: finalAudio?.voice_name || "",
+          tts_engine: activeTtsEngine,
+          bgm_style: bgmStyle,
+          audio_format: audioFormat,
+          country,
+          language: language || "",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Save failed");
+      }
+      setSaved(true);
+    } catch {
+      setSaved(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const reset = () => {
     setStep("input");
     setPreviews([]);
@@ -266,6 +305,9 @@ export default function ScriptToVoicePage() {
     setPreviewError("");
     setGenerateError("");
     setActiveTtsEngine("");
+    setSaveName("");
+    setSaving(false);
+    setSaved(false);
     setBgmId(null);
     setBgmFileName("");
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
@@ -644,14 +686,13 @@ export default function ScriptToVoicePage() {
                   <p className="text-sm font-semibold text-[var(--text-primary)]">Final Audio</p>
                   <p className="text-[10px] text-[var(--text-tertiary)]">{finalAudio.voice_name}</p>
                 </div>
-                <a
-                  href={finalAudio.public_url || finalAudio.url}
-                  download={`script-to-voice.${audioFormat}`}
+                <button
+                  onClick={() => forceDownload(finalAudio.public_url || finalAudio.url, `script-to-voice.${audioFormat}`)}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-[var(--accent)] hover:brightness-110 transition-all"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Download {audioFormat.toUpperCase()}
-                </a>
+                </button>
               </div>
             </div>
 
@@ -661,6 +702,43 @@ export default function ScriptToVoicePage() {
               <p className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
                 {scriptText}
               </p>
+            </div>
+
+            {/* Save to Dashboard */}
+            <div className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] p-6 space-y-4">
+              <h3 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center gap-2">
+                <Save className="w-3.5 h-3.5" />
+                Save to Dashboard
+              </h3>
+              {saved ? (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-[var(--success)]/10 text-[var(--success)] text-sm font-medium">
+                  <Check className="w-4 h-4" />
+                  Saved to dashboard as &ldquo;{saveName}&rdquo;
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Give this recording a name..."
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+                    className="flex-1 bg-[var(--input-bg)] border border-[var(--card-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30"
+                  />
+                  <button
+                    onClick={handleSave}
+                    disabled={!saveName.trim() || saving}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {saving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Start over */}

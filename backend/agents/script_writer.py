@@ -1,6 +1,7 @@
-"""Agent 3: Script Writer -- creates Hook + Body + CTA scripts with ElevenLabs V3 audio tags.
+"""Agent 3: Script Writer -- creates Hook + Body + CTA scripts with emotion tags.
 
 Generates scripts in parallel batches to avoid LLM output-length limits.
+Emotion tags like [excited], [warm] guide voice tone; they are stripped before TTS.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ SYSTEM_PROMPT = """\
 You are an expert OBD (Outbound Dialer) copywriter who creates promotional voice scripts \
 for telecom markets. You understand local culture, psychology, and persuasion.
 
-Create OBD scripts with ElevenLabs V3 audio tags embedded in the text.
+Create OBD scripts with emotion tags embedded in the text. These tags guide the voice \
+actor's tone and delivery. Use ONLY square-bracket tags from the approved list below.
 
 SCRIPT STRUCTURE (each variant):
 - hook: First 5 seconds, grab attention immediately. Use [excited], [curious], cultural refs.
@@ -40,8 +42,10 @@ SCRIPT STRUCTURE (each variant):
 - polite_closure: Graceful exit (~10 words).
 - full_script: hook + body + cta combined into one string.
 
-AUDIO TAGS (use 3-5 per script): [excited], [curious], [whispers], [laughs], [pause], \
-[short pause], [cheerfully], [mischievously], [playfully], [sigh], [gasps]. \
+EMOTION TAGS (use 3-5 per script, ONLY these square-bracket tags): \
+[excited], [curious], [warm], [gentle], [whispers], [laughs], [pause], \
+[short pause], [cheerfully], [mischievously], [playfully], [sigh], [gasps], \
+[soft], [energetic], [sincere], [urgent].
 Also use CAPITALIZATION for emphasis and ellipses (...) for dramatic pauses.
 
 RULES:
@@ -64,7 +68,7 @@ REVISION_SYSTEM_PROMPT = """\
 You are an expert OBD copywriter revising scripts based on evaluation feedback.
 
 Apply the feedback improvements while keeping the same JSON output format.
-Each variant must be under {max_words} words, include ElevenLabs V3 audio tags, \
+Each variant must be under {max_words} words, include emotion tags from the approved list, \
 be culturally relevant, and have clear DTMF CTAs.
 Keep each variant's unique creative angle (theme) while incorporating feedback.
 
@@ -149,7 +153,7 @@ class ScriptWriterAgent(BaseAgent):
     """Creates OBD promotional scripts with hook, body, CTA, and fallbacks."""
 
     name = "ScriptWriter"
-    description = "Creates compelling OBD scripts with cultural relevance and audio tags"
+    description = "Creates compelling OBD scripts with cultural relevance and emotion tags"
 
     async def run(
         self,
@@ -204,7 +208,7 @@ PRODUCT:
 MARKET:
 {market_summary}{lang_instruction}
 
-Each variant needs its specified creative angle. Embed ElevenLabs V3 audio tags in every field. \
+Each variant needs its specified creative angle. Include emotion tags from the approved list. \
 Under {max_words} words per script. Output valid JSON with "scripts" array of {count} objects.\
 """
 
@@ -329,7 +333,7 @@ FEEDBACK:
 {feedback_text}{lang_instruction}
 
 Return ALL {count} revised variants. Keep each variant's unique theme. \
-Embed ElevenLabs V3 audio tags. Under {max_words} words per script. \
+Include emotion tags. Under {max_words} words per script. \
 Output valid JSON with "scripts" array of {count} objects.\
 """
             response = await self.call_llm(

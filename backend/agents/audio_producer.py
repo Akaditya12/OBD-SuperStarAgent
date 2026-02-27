@@ -40,10 +40,38 @@ from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
 
-# Matches ANY [tag] -- catches all LLM-invented tags like [neutral], [friendly], etc.
-_ANY_BRACKET_TAG = re.compile(r"\[[^\]]{1,30}\]")
+# Matches ANY [tag] with no length limit
+_ANY_BRACKET_TAG = re.compile(r"\[[^\]]+\]")
+# Matches fullwidth brackets 【tag】 (LLMs occasionally use these)
+_FULLWIDTH_BRACKET_TAG = re.compile(r"【[^】]+】")
+# Matches (tag) when the content looks like a voice/emotion direction, not real speech
+_PAREN_DIRECTION_TAG = re.compile(
+    r"\(\s*(?:warm|gentle|soft|excited|curious|cheerful(?:ly)?|neutral|friendly|"
+    r"mischievous(?:ly)?|playful(?:ly)?|energetic(?:ally)?|calm(?:ly)?|sincere(?:ly)?|"
+    r"enthusiastic(?:ally)?|serious(?:ly)?|whisper(?:s|ing)?|dramatic(?:ally)?|"
+    r"urgent(?:ly)?|compassionate(?:ly)?|empathetic(?:ally)?|sad(?:ly)?|happy|"
+    r"joyful(?:ly)?|confident(?:ly)?|soothing(?:ly)?|reassuring(?:ly)?|"
+    r"encouraging(?:ly)?|inspiring|motivating|conversational(?:ly)?|"
+    r"pause|short\s*pause|long\s*pause|beat|breath|sigh|gasp|laugh|chuckle|"
+    r"voice\s*direction|tone|emotion|with\s+emotion|with\s+warmth|"
+    r"in\s+a\s+\w+\s+tone|in\s+a\s+\w+\s+voice)\s*\)",
+    re.IGNORECASE,
+)
+# Matches {tag} curly-brace directions
+_CURLY_DIRECTION_TAG = re.compile(r"\{[^}]{1,50}\}", re.IGNORECASE)
 # Matches XML-style tags like <voice emotion='curious'>, </voice>, <break time="1s"/>, etc.
-_ANY_XML_TAG = re.compile(r"</?[a-zA-Z][^>]{0,80}>")
+_ANY_XML_TAG = re.compile(r"</?[a-zA-Z][^>]{0,120}>")
+# Standalone emotion/direction words at the very start of a line or after punctuation
+_STANDALONE_DIRECTION = re.compile(
+    r"(?:^|(?<=\.\s)|(?<=!\s)|(?<=\?\s))\s*"
+    r"(?:warm(?:ly)?|gentle|gently|soft(?:ly)?|excited(?:ly)?|curious(?:ly)?|"
+    r"cheerful(?:ly)?|neutral|friendly|mischievous(?:ly)?|playful(?:ly)?|"
+    r"energetic(?:ally)?|calm(?:ly)?|sincere(?:ly)?|enthusiastic(?:ally)?|"
+    r"serious(?:ly)?|dramatic(?:ally)?|urgent(?:ly)?|compassionate(?:ly)?|"
+    r"soothing(?:ly)?|reassuring(?:ly)?|encouraging(?:ly)?|conversational(?:ly)?)"
+    r"\s*[,:]?\s*(?=\S)",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 EDGE_VOICE_MAP: dict[str, str] = {
     "en-IN": "en-IN-NeerjaNeural",
@@ -123,12 +151,11 @@ _PRONUNCIATION_FIXES: list[tuple[re.Pattern, str]] = [
 
 
 def _clean_text_for_tts(text: str, apply_pronunciation_hacks: bool = True) -> str:
-    """Strip ALL bracket tags and prepare text for TTS.
+    """Strip ALL bracket/direction tags and prepare text for TTS.
 
-    Args:
-        apply_pronunciation_hacks: If True, replace acronyms with spaced letters
-            (for edge-tts/elevenlabs). Set False for Murf which uses its own
-            pronunciationDictionary.
+    Aggressively removes every kind of tag the LLM might invent:
+    [square], 【fullwidth】, (parenthetical direction), {curly}, <xml>, and
+    standalone emotion words used as stage directions.
     """
     # Step 1: Convert known tags to natural speech sounds
     text = re.sub(r"\[laughs?\]", "ha ha, ", text, flags=re.IGNORECASE)
@@ -138,16 +165,28 @@ def _clean_text_for_tts(text: str, apply_pronunciation_hacks: bool = True) -> st
     text = re.sub(r"\[short\s*pause\]", ", ", text, flags=re.IGNORECASE)
     text = re.sub(r"\[pause\]", "... ", text, flags=re.IGNORECASE)
 
-    # Step 2: Strip ALL remaining [anything] tags
+    # Step 2: Strip ALL [anything] tags (no length limit)
     text = _ANY_BRACKET_TAG.sub("", text)
 
-    # Step 3: Strip XML-style tags (<voice emotion='...'>, </voice>, etc.)
+    # Step 3: Strip fullwidth bracket tags 【anything】
+    text = _FULLWIDTH_BRACKET_TAG.sub("", text)
+
+    # Step 4: Strip (direction) parenthetical tags like (warm), (cheerfully)
+    text = _PAREN_DIRECTION_TAG.sub("", text)
+
+    # Step 5: Strip {direction} curly-brace tags
+    text = _CURLY_DIRECTION_TAG.sub("", text)
+
+    # Step 6: Strip XML-style tags (<voice emotion='...'>, </voice>, etc.)
     text = _ANY_XML_TAG.sub("", text)
 
-    # Step 4: Remove markdown bold/italic markers
+    # Step 7: Strip standalone emotion/direction words at sentence start
+    text = _STANDALONE_DIRECTION.sub("", text)
+
+    # Step 8: Remove markdown bold/italic markers
     text = text.replace("**", "").replace("*", "")
 
-    # Step 5: Convert ALL-CAPS common words back to normal case so TTS
+    # Step 9: Convert ALL-CAPS common words back to normal case so TTS
     # doesn't spell them out (e.g. "YOU" -> "you", "NOW" -> "now").
     _KNOWN_ACRONYMS = {"IVR", "OBD", "CLI", "BNG", "DTMF", "USSD", "SMS", "CTA", "AI", "INR"}
     def _fix_caps(m: re.Match) -> str:
@@ -155,12 +194,12 @@ def _clean_text_for_tts(text: str, apply_pronunciation_hacks: bool = True) -> st
         return word if word in _KNOWN_ACRONYMS else word.capitalize()
     text = re.sub(r"\b[A-Z]{2,}\b", _fix_caps, text)
 
-    # Step 6: Fix acronym/brand pronunciation (only for non-Murf engines)
+    # Step 10: Fix acronym/brand pronunciation (only for non-Murf engines)
     if apply_pronunciation_hacks:
         for pattern, replacement in _PRONUNCIATION_FIXES:
             text = pattern.sub(replacement, text)
 
-    # Step 7: Clean up artifacts
+    # Step 11: Clean up artifacts
     text = re.sub(r"\s{2,}", " ", text).strip()
     text = re.sub(r"\s+([,.])", r"\1", text)  # fix " ," or " ."
     text = re.sub(r"^[,.\s]+", "", text)       # fix leading comma/period
@@ -1238,6 +1277,16 @@ class AudioProducerAgent(BaseAgent):
         edge_voice = engine_ctx["edge_voice"]
 
         async def _tts_job(job: dict[str, Any]) -> dict[str, Any]:
+            job["text"] = _clean_text_for_tts(
+                job["text"],
+                apply_pronunciation_hacks=(tts_engine != "murf"),
+            )
+            if re.search(r"[\[\]【】<>{}]", job["text"]):
+                logger.warning(
+                    f"[{self.name}] Possible residual tags in TTS text: "
+                    f"{job['text'][:150]!r}"
+                )
+
             skip_bgm = job.get("skip_bgm", False)
             bgm_style = job.get("bgm_style", "upbeat")
             custom_bgm = job.get("custom_bgm_path")

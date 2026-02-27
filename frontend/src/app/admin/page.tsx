@@ -88,16 +88,27 @@ export default function AdminPage() {
     const [savingAgent, setSavingAgent] = useState<string | null>(null);
     const [agentMsg, setAgentMsg] = useState<Record<string, string>>({});
 
-    const fetchUsers = async () => {
+    const fetchUsers = async (retries = 2) => {
         setLoading(true);
-        try {
-            const res = await fetch("/api/admin/users");
-            if (res.status === 401 || res.status === 403) { router.push("/dashboard"); return; }
-            if (!res.ok) throw new Error("Failed to fetch users");
-            const data = await res.json();
-            setUsers(data.users || []);
-        } catch (err: any) { setError(err.message); }
-        finally { setLoading(false); }
+        setError("");
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const res = await fetch("/api/admin/users");
+                if (res.status === 401 || res.status === 403) { router.push("/dashboard"); return; }
+                if (!res.ok) throw new Error("Failed to fetch users");
+                const data = await res.json();
+                setUsers(data.users || []);
+                setLoading(false);
+                return;
+            } catch (err: any) {
+                if (attempt === retries) {
+                    setError(err.message);
+                } else {
+                    await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+                }
+            }
+        }
+        setLoading(false);
     };
 
     const fetchConfig = async () => {
@@ -184,6 +195,7 @@ export default function AdminPage() {
     };
 
     const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
+        setError("");
         try {
             const res = await fetch(`/api/admin/users/${userId}`, {
                 method: "PUT",
@@ -192,7 +204,7 @@ export default function AdminPage() {
             });
             if (!res.ok) throw new Error("Failed to update user");
             fetchUsers();
-        } catch (err: any) { alert(err.message); }
+        } catch (err: any) { setError(err.message); }
     };
 
     const updateConfig = (key: keyof PipelineConfig, value: number | string) => {
@@ -276,7 +288,12 @@ export default function AdminPage() {
             </div>
 
             {error && (
-                <div className="bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20 px-4 py-3 rounded-xl text-sm">{error}</div>
+                <div className="bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20 px-4 py-3 rounded-xl text-sm flex items-center justify-between">
+                    <span>{error}</span>
+                    <button onClick={() => { setError(""); fetchUsers(); }} className="ml-3 flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg border border-[var(--error)]/20 hover:bg-[var(--error)]/10 transition-colors">
+                        <RefreshCw className="w-3 h-3" /> Retry
+                    </button>
+                </div>
             )}
 
             {/* ═══════ Users Tab ═══════ */}

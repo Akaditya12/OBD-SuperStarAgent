@@ -1139,6 +1139,27 @@ async def generate_full_audio(session_id: str, request: Request):
                 f"Full audio generated for session {session_id}: "
                 f"{audio_result.get('summary', {}).get('total_generated', 0)} files"
             )
+
+            # Auto-update saved campaign with the new audio data
+            try:
+                existing_campaign = get_campaign(session_id)
+                if existing_campaign:
+                    updated_result = existing_campaign.get("result", {})
+                    updated_result["audio"] = _make_serializable(audio_result)
+                    save_campaign(
+                        campaign_id=session_id,
+                        name=existing_campaign.get("name", ""),
+                        created_by=existing_campaign.get("created_by", "local"),
+                        country=existing_campaign.get("country", ""),
+                        telco=existing_campaign.get("telco", ""),
+                        language=existing_campaign.get("language", ""),
+                        result=updated_result,
+                        team=existing_campaign.get("team", "default"),
+                    )
+                    logger.info(f"Auto-updated saved campaign {session_id} with audio data")
+            except Exception as upd_err:
+                logger.warning(f"Could not auto-update campaign {session_id} with audio: {upd_err}")
+
             _audio_jobs[job_id] = {
                 "status": "done",
                 "session_id": session_id,
@@ -1627,10 +1648,19 @@ async def translate_script(request: Request):
     agent = TranslatorAgent()
     try:
         system_prompt = (
-            "You are a professional translator. Translate the given text accurately to English. "
-            "Preserve the meaning, tone, and structure. Remove any audio/voice tags like [warm], [gentle], "
-            "[cheerfully], [short pause] etc. from the translation -- just translate the spoken words. "
-            "Return valid JSON: {\"translated\": \"...\", \"source_language\": \"...\"}"
+            "You are a professional translator specializing in telecom marketing scripts. "
+            "Translate the given text accurately and naturally to English.\n\n"
+            "RULES:\n"
+            "1. Produce a fluent, natural English translation -- NOT a word-for-word literal translation.\n"
+            "2. Preserve the original meaning, persuasive tone, and promotional intent.\n"
+            "3. Keep the same paragraph/line structure as the source.\n"
+            "4. REMOVE all audio/voice/emotion tags such as [warm], [gentle], [excited], "
+            "[short pause], [cheerfully], [whispers], etc. -- translate ONLY the spoken words.\n"
+            "5. Preserve brand names, product names, numbers, and URLs exactly as they appear.\n"
+            "6. If the text is already in English, return it as-is (still strip any tags).\n"
+            "7. Detect the source language automatically if not provided.\n\n"
+            "Return valid JSON: {\"translated\": \"the full English translation\", "
+            "\"source_language\": \"detected language name\"}"
         )
         user_prompt = f"Translate this to English:\n\n{text}"
         if source_lang:
@@ -1839,3 +1869,52 @@ async def stv_generate(request: Request):
 
     asyncio.create_task(_run())
     return {"status": "accepted", "job_id": job_id, "session_id": session_id}
+
+
+@app.post("/api/script-to-voice/save")
+async def stv_save(request: Request):
+    """Save a Script-to-Voice result to the dashboard as a campaign."""
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    name = (body.get("name") or "").strip()
+    script_text = (body.get("script_text") or "").strip()
+    voice_name = body.get("voice_name", "")
+    tts_engine = body.get("tts_engine", "")
+    bgm_style = body.get("bgm_style", "none")
+    audio_format = body.get("audio_format", "mp3")
+    country = body.get("country", "")
+    language = body.get("language", "")
+
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "name is required"})
+
+    username = getattr(request.state, "username", "local")
+    user_payload = getattr(request.state, "user", {})
+    team = user_payload.get("team", "default") if isinstance(user_payload, dict) else "default"
+
+    existing = sessions.get(session_id) or {}
+    audio_data = existing.get("audio", {})
+
+    result_payload: dict[str, Any] = {
+        "campaign_type": "script_to_voice",
+        "session_id": session_id,
+        "script_text": script_text,
+        "voice_name": voice_name,
+        "tts_engine": tts_engine,
+        "bgm_style": bgm_style,
+        "audio_format": audio_format,
+        "audio": audio_data,
+    }
+
+    campaign = save_campaign(
+        campaign_id=session_id or uuid.uuid4().hex[:8],
+        name=name,
+        created_by=username,
+        country=country,
+        telco="",
+        language=language,
+        result=result_payload,
+        team=team,
+    )
+
+    return campaign
