@@ -68,6 +68,7 @@ class PipelineOrchestrator:
         language: str | None = None,
         tts_engine: str | None = None,
         force_reanalyze: bool = False,
+        get_step_overrides: Callable[[], dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Execute the full pipeline.
 
@@ -77,10 +78,14 @@ class PipelineOrchestrator:
             telco: Telco operator name.
             language: Optional target language override.
             force_reanalyze: If True, skip cache and re-run analysis.
+            get_step_overrides: Callable returning current step overrides dict
+                (e.g. {"EvalPanel": "skip"}). Read live so user can skip
+                steps while the pipeline is running.
 
         Returns:
             Complete pipeline results including all intermediate outputs.
         """
+        _overrides = get_step_overrides or (lambda: {})
         session_id = str(uuid.uuid4())[:8]
         results: dict[str, Any] = {"session_id": session_id}
 
@@ -101,7 +106,10 @@ class PipelineOrchestrator:
                 product_text, country, telco, language,
             )
 
-            if cached:
+            match_type = cached.get("match_type") if cached else None
+
+            if cached and match_type == "exact":
+                # Full cache hit -- skip both steps
                 product_brief = cached["product_brief"]
                 market_analysis = cached["market_analysis"]
                 results["product_brief"] = product_brief
@@ -113,8 +121,39 @@ class PipelineOrchestrator:
                 await self.on_progress("MarketResearcher", "completed", {
                     "message": "Market analysis complete (cached)",
                 })
-                logger.info("Using cached analysis — skipping Steps 1 & 2")
+                logger.info("Using cached analysis (exact) — skipping Steps 1 & 2")
+
+            elif cached and match_type == "partial":
+                # Partial hit: market_analysis cached, but need fresh product analysis
+                market_analysis = cached["market_analysis"]
+                results["market_analysis"] = market_analysis
+                results["market_analysis_cached"] = True
+                await self.on_progress("MarketResearcher", "completed", {
+                    "message": "Market analysis complete (cached)",
+                })
+                logger.info("Using cached market analysis (partial) — skipping Step 2 only")
+
+                await self.on_progress("ProductAnalyzer", "started", {
+                    "message": "Analyzing product documentation..."
+                })
+                t0 = time.monotonic()
+                product_brief = await self.product_analyzer.run(product_text=product_text)
+                elapsed = time.monotonic() - t0
+                logger.info(f"[ProductAnalyzer] completed in {elapsed:.1f}s")
+                results["product_brief"] = product_brief
+                await self.on_progress("ProductAnalyzer", "completed", {
+                    "message": f"Product analyzed: {product_brief.get('product_name', 'Unknown')}",
+                    "data": product_brief,
+                    "system_prompt": self.product_analyzer.last_system_prompt,
+                    "user_prompt": self.product_analyzer.last_user_prompt,
+                })
+
+                save_analysis_cache(
+                    product_text, country, telco, language,
+                    product_brief, market_analysis,
+                )
             else:
+                # No cache -- run both steps in parallel
                 await self.on_progress("ProductAnalyzer", "started", {
                     "message": "Analyzing product documentation..."
                 })
@@ -187,44 +226,66 @@ class PipelineOrchestrator:
             live_cfg = get_live_config()
             eval_rounds = live_cfg.get("eval_feedback_rounds", EVAL_FEEDBACK_ROUNDS)
             final_scripts = scripts
-            for round_num in range(eval_rounds):
-                round_label = f"(round {round_num + 1}/{eval_rounds})"
 
-                # Evaluate
-                await self.on_progress("EvalPanel", "started", {
-                    "message": f"Evaluation panel reviewing scripts {round_label}..."
+            skip_eval = _overrides().get("EvalPanel") == "skip" or eval_rounds == 0
+            if skip_eval:
+                reason = "skipped by user" if _overrides().get("EvalPanel") == "skip" else "eval rounds set to 0"
+                await self.on_progress("EvalPanel", "skipped", {
+                    "message": f"Evaluation skipped ({reason})",
                 })
-                evaluation = await self.eval_panel.run(
-                    scripts=final_scripts,
-                    product_brief=product_brief,
-                    market_analysis=market_analysis,
-                )
-                results[f"evaluation_round_{round_num + 1}"] = evaluation
-                await self.on_progress("EvalPanel", "completed", {
-                    "message": f"Evaluation complete {round_label}",
-                    "data": evaluation,
-                    "system_prompt": self.eval_panel.last_system_prompt,
-                    "user_prompt": self.eval_panel.last_user_prompt,
+                await self.on_progress("ScriptWriter_Revision", "skipped", {
+                    "message": f"Revision skipped ({reason})",
                 })
+                logger.info("Eval + Revision skipped: %s", reason)
+            else:
+                for round_num in range(eval_rounds):
+                    # Re-check overrides each round in case user skips mid-loop
+                    if _overrides().get("EvalPanel") == "skip":
+                        await self.on_progress("EvalPanel", "skipped", {
+                            "message": "Evaluation skipped by user",
+                        })
+                        await self.on_progress("ScriptWriter_Revision", "skipped", {
+                            "message": "Revision skipped by user",
+                        })
+                        break
 
-                # Revise
-                await self.on_progress("ScriptWriter_Revision", "started", {
-                    "message": f"Revising scripts based on feedback {round_label}..."
-                })
-                final_scripts = await self.script_writer.run(
-                    product_brief=product_brief,
-                    market_analysis=market_analysis,
-                    feedback=evaluation,
-                    previous_scripts=final_scripts,
-                    language_override=language,
-                )
-                results[f"revised_scripts_round_{round_num + 1}"] = final_scripts
-                await self.on_progress("ScriptWriter_Revision", "completed", {
-                    "message": f"Scripts revised {round_label}",
-                    "data": final_scripts,
-                    "system_prompt": self.script_writer.last_system_prompt,
-                    "user_prompt": self.script_writer.last_user_prompt,
-                })
+                    round_label = f"(round {round_num + 1}/{eval_rounds})"
+
+                    # Evaluate
+                    await self.on_progress("EvalPanel", "started", {
+                        "message": f"Evaluation panel reviewing scripts {round_label}..."
+                    })
+                    evaluation = await self.eval_panel.run(
+                        scripts=final_scripts,
+                        product_brief=product_brief,
+                        market_analysis=market_analysis,
+                    )
+                    results[f"evaluation_round_{round_num + 1}"] = evaluation
+                    await self.on_progress("EvalPanel", "completed", {
+                        "message": f"Evaluation complete {round_label}",
+                        "data": evaluation,
+                        "system_prompt": self.eval_panel.last_system_prompt,
+                        "user_prompt": self.eval_panel.last_user_prompt,
+                    })
+
+                    # Revise
+                    await self.on_progress("ScriptWriter_Revision", "started", {
+                        "message": f"Revising scripts based on feedback {round_label}..."
+                    })
+                    final_scripts = await self.script_writer.run(
+                        product_brief=product_brief,
+                        market_analysis=market_analysis,
+                        feedback=evaluation,
+                        previous_scripts=final_scripts,
+                        language_override=language,
+                    )
+                    results[f"revised_scripts_round_{round_num + 1}"] = final_scripts
+                    await self.on_progress("ScriptWriter_Revision", "completed", {
+                        "message": f"Scripts revised {round_label}",
+                        "data": final_scripts,
+                        "system_prompt": self.script_writer.last_system_prompt,
+                        "user_prompt": self.script_writer.last_user_prompt,
+                    })
 
             results["final_scripts"] = final_scripts
 

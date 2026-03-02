@@ -307,21 +307,112 @@ def _analysis_cache_key(product_text: str, country: str, telco: str, language: s
 
 
 def get_cached_analysis(product_text: str, country: str, telco: str, language: str | None) -> Optional[dict[str, Any]]:
-    """Look up cached product_brief + market_analysis for this input combo."""
+    """Look up cached product_brief + market_analysis.
+
+    Tries exact match first (same product+country+telco). If no exact match,
+    falls back to partial match (same country+telco) to reuse market_analysis
+    while returning None for product_brief so the pipeline re-runs only step 1.
+    """
     cache_key = _analysis_cache_key(product_text, country, telco, language)
 
-    if supabase:
-        try:
-            resp = supabase.table("analysis_cache").select("*").eq("cache_key", cache_key).maybe_single().execute()
-            if resp.data:
-                logger.info("Analysis cache HIT for key %s", cache_key)
-                return {
-                    "product_brief": resp.data.get("product_brief"),
-                    "market_analysis": resp.data.get("market_analysis"),
-                }
-        except Exception as e:
-            logger.warning("Analysis cache lookup failed: %s", e)
+    if not supabase:
+        return None
+
+    # 1) Exact match
+    try:
+        resp = (
+            supabase.table("analysis_cache")
+            .select("product_brief, market_analysis")
+            .eq("cache_key", cache_key)
+            .limit(1)
+            .execute()
+        )
+        if resp and resp.data and len(resp.data) > 0:
+            row = resp.data[0]
+            logger.info("Analysis cache EXACT HIT for key %s", cache_key)
+            return {
+                "product_brief": row.get("product_brief"),
+                "market_analysis": row.get("market_analysis"),
+                "match_type": "exact",
+            }
+    except Exception as e:
+        logger.warning("Exact cache lookup failed: %s", e)
+
+    # 2) Partial match: same country + telco (reuse market_analysis only)
+    try:
+        resp = (
+            supabase.table("analysis_cache")
+            .select("market_analysis")
+            .eq("country", country)
+            .eq("telco", telco)
+            .order("cache_key", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resp and resp.data and len(resp.data) > 0:
+            row = resp.data[0]
+            logger.info("Analysis cache PARTIAL HIT (country+telco) for %s/%s", country, telco)
+            return {
+                "product_brief": None,
+                "market_analysis": row.get("market_analysis"),
+                "match_type": "partial",
+            }
+    except Exception as e:
+        logger.warning("Partial cache lookup failed: %s", e)
+
     return None
+
+
+def check_cache_exists(product_text: str, country: str, telco: str, language: str | None) -> dict[str, Any]:
+    """Check for cached analysis -- exact match and partial (same country+telco).
+
+    Returns:
+        {
+            "exact": true/false,
+            "exact_cached_at": "...",
+            "partial": true/false,
+            "partial_cached_at": "...",
+        }
+    """
+    result: dict[str, Any] = {"exact": False, "partial": False}
+    if not supabase:
+        return result
+
+    cache_key = _analysis_cache_key(product_text, country, telco, language)
+
+    # Exact match: same product + country + telco
+    try:
+        resp = (
+            supabase.table("analysis_cache")
+            .select("cache_key")
+            .eq("cache_key", cache_key)
+            .limit(1)
+            .execute()
+        )
+        if resp.data and len(resp.data) > 0:
+            result["exact"] = True
+            result["exact_cached_at"] = resp.data[0].get("cached_at", "")
+    except Exception as e:
+        logger.warning("Exact cache check failed: %s", e)
+
+    # Partial match: same country + telco, any product
+    if not result["exact"]:
+        try:
+            resp = (
+                supabase.table("analysis_cache")
+                .select("cache_key, country, telco")
+                .eq("country", country)
+                .eq("telco", telco)
+                .limit(1)
+                .execute()
+            )
+            if resp.data and len(resp.data) > 0:
+                result["partial"] = True
+                result["partial_cached_at"] = resp.data[0].get("cached_at", "")
+        except Exception as e:
+            logger.warning("Partial cache check failed: %s", e)
+
+    return result
 
 
 def save_analysis_cache(
@@ -333,21 +424,32 @@ def save_analysis_cache(
     market_analysis: dict[str, Any],
 ) -> None:
     """Store analysis results so they can be reused."""
+    from datetime import datetime, timezone
     cache_key = _analysis_cache_key(product_text, country, telco, language)
 
     if supabase:
+        row: dict[str, Any] = {
+            "cache_key": cache_key,
+            "country": country,
+            "telco": telco,
+            "language": language or "",
+            "product_brief": product_brief,
+            "market_analysis": market_analysis,
+        }
         try:
-            supabase.table("analysis_cache").upsert({
-                "cache_key": cache_key,
-                "country": country,
-                "telco": telco,
-                "language": language or "",
-                "product_brief": product_brief,
-                "market_analysis": market_analysis,
-            }).execute()
+            row["cached_at"] = datetime.now(timezone.utc).isoformat()
+            supabase.table("analysis_cache").upsert(row).execute()
             logger.info("Saved analysis cache for key %s", cache_key)
         except Exception as e:
-            logger.warning("Failed to save analysis cache: %s", e)
+            if "cached_at" in str(e):
+                row.pop("cached_at", None)
+                try:
+                    supabase.table("analysis_cache").upsert(row).execute()
+                    logger.info("Saved analysis cache for key %s (without cached_at)", cache_key)
+                except Exception as e2:
+                    logger.warning("Failed to save analysis cache: %s", e2)
+            else:
+                logger.warning("Failed to save analysis cache: %s", e)
 
 
 # ── App Config (Pipeline Settings) ────────────────────────────────────────────

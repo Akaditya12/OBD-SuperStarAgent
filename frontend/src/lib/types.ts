@@ -151,7 +151,7 @@ export interface PipelineResult {
 
 export interface WsProgressMessage {
   agent: string;
-  status: "started" | "completed" | "error" | "done";
+  status: "started" | "completed" | "error" | "done" | "skipped";
   message: string;
   data?: Record<string, unknown>;
   session_id?: string;

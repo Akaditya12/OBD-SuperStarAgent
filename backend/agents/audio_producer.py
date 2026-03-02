@@ -917,7 +917,7 @@ class AudioProducerAgent(BaseAgent):
                     "api-key": MURF_API_KEY,
                     "Content-Type": "application/json",
                 },
-                timeout=60.0,
+                timeout=30.0,
             )
             if response.status_code != 200:
                 logger.error(f"[{self.name}] Murf error {response.status_code}: {response.text[:300]}")
@@ -980,29 +980,56 @@ class AudioProducerAgent(BaseAgent):
 
         from backend.config import get_live_config
         live = get_live_config()
+
+        # eleven_v3 needs higher stability for clear local language pronunciation
+        is_v3 = "v3" in effective_model
+        default_stability = 0.50 if is_v3 else 0.35
+        default_similarity = 0.80
+        default_style = 0.35 if is_v3 else 0.45
+
+        vs: dict[str, Any] = {
+            "stability": voice_settings.get("stability", live.get("voice_stability", default_stability)),
+            "similarity_boost": voice_settings.get("similarity_boost", live.get("voice_similarity_boost", default_similarity)),
+            "style": voice_settings.get("style", live.get("voice_style", default_style)),
+            "use_speaker_boost": True,
+        }
+
         payload: dict[str, Any] = {
             "text": clean_text,
             "model_id": effective_model,
-            "voice_settings": {
-                "stability": voice_settings.get("stability", live.get("voice_stability", 0.35)),
-                "similarity_boost": voice_settings.get("similarity_boost", live.get("voice_similarity_boost", 0.80)),
-                "style": voice_settings.get("style", live.get("voice_style", 0.45)),
-                "use_speaker_boost": True,
-            },
+            "voice_settings": vs,
         }
+
+        # eleven_v3 supports speed parameter for perfect OBD pacing
+        if is_v3:
+            speed = voice_settings.get("speed", live.get("voice_speed", 1.0))
+            payload["speed"] = speed
+
+        headers = {
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
+        params = {"output_format": ELEVENLABS_OUTPUT_FORMAT}
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url,
-                json=payload,
-                headers={
-                    "xi-api-key": ELEVENLABS_API_KEY,
-                    "Content-Type": "application/json",
-                    "Accept": "audio/mpeg",
-                },
-                params={"output_format": ELEVENLABS_OUTPUT_FORMAT},
-                timeout=60.0,
+                url, json=payload, headers=headers, params=params, timeout=30.0,
             )
+
+            # Auto-fallback: if v3 fails, retry with eleven_multilingual_v2
+            if response.status_code != 200 and is_v3:
+                logger.warning(
+                    f"[{self.name}] eleven_v3 returned {response.status_code}, "
+                    f"falling back to eleven_multilingual_v2"
+                )
+                payload["model_id"] = "eleven_multilingual_v2"
+                payload.pop("speed", None)
+                response = await client.post(
+                    url, json=payload, headers=headers, params=params, timeout=30.0,
+                )
+                effective_model = "eleven_multilingual_v2"
+
             if response.status_code != 200:
                 logger.error(f"[{self.name}] ElevenLabs error {response.status_code}: {response.text[:300]}")
                 response.raise_for_status()
@@ -1028,29 +1055,24 @@ class AudioProducerAgent(BaseAgent):
         }
 
     async def _validate_voice_id(self, voice_id: str) -> str:
+        """Validate a voice ID exists. With premium keys, trust the ID
+        since it may be from the shared library not returned by /v2/voices."""
         try:
             async with httpx.AsyncClient() as client:
+                # Quick check: try to get the specific voice directly
                 response = await client.get(
-                    f"{ELEVENLABS_BASE_URL}/v2/voices",
+                    f"{ELEVENLABS_BASE_URL}/v1/voices/{voice_id}",
                     headers={"xi-api-key": ELEVENLABS_API_KEY},
-                    params={"page_size": 100},
-                    timeout=15.0,
+                    timeout=10.0,
                 )
-                if response.status_code == 401:
-                    logger.info(f"[{self.name}] Voices API restricted — trusting voice_id {voice_id}")
+                if response.status_code == 200:
                     return voice_id
-                response.raise_for_status()
-                voices = response.json().get("voices", [])
-                valid_ids = {v["voice_id"] for v in voices}
-
-                if voice_id in valid_ids:
+                if response.status_code in (401, 403):
+                    logger.info(f"[{self.name}] Voice API restricted — trusting voice_id {voice_id}")
                     return voice_id
-
-                logger.warning(f"[{self.name}] Voice '{voice_id}' not found, falling back")
-                if voices:
-                    return voices[0]["voice_id"]
+                logger.warning(f"[{self.name}] Voice '{voice_id}' returned {response.status_code}, trusting anyway")
         except Exception as e:
-            logger.error(f"[{self.name}] Voice validation failed: {e}")
+            logger.error(f"[{self.name}] Voice validation failed: {e} — trusting voice_id")
         return voice_id
 
     async def _build_elevenlabs_voice_pool(
@@ -1082,70 +1104,122 @@ class AudioProducerAgent(BaseAgent):
             or "female"
         )
         seen_ids = {primary_voice_id}
+        pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
 
-        is_african = country.lower() in {
+        # Collect LLM-selected alternatives as candidates (used after gender balancing)
+        alt_candidates: list[tuple[str, str]] = []
+        for alt in voice_selection.get("alternative_voices", []):
+            alt_id = alt.get("voice_id", "")
+            alt_name = alt.get("name", "Alt Voice")
+            if alt_id and alt_id not in seen_ids:
+                alt_candidates.append((alt_id, alt_name))
+                seen_ids.add(alt_id)
+
+        # ── Build region-aware curated voices for gender-balanced filling ──
+        _country_lower = country.lower().strip()
+        is_african = _country_lower in {
             "nigeria", "kenya", "tanzania", "south africa", "ghana",
             "cameroon", "senegal", "congo (drc)", "congo (republic)",
             "ethiopia", "mozambique", "rwanda", "uganda", "zambia",
             "zimbabwe", "botswana", "somalia",
         }
+        is_south_asian = _country_lower in {
+            "india", "bangladesh", "sri lanka", "nepal", "pakistan",
+        }
+        is_middle_east = _country_lower in {
+            "saudi arabia", "uae", "qatar", "oman", "bahrain", "kuwait",
+            "egypt", "jordan", "iraq", "lebanon",
+        }
 
         import random
-        female_voices = [
-            ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
-            ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female)"),
-            ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
-            ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female)"),
-            ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
-            ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
-            ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
-        ] if is_african else [
-            ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
-            ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
-            ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
-            ("jsCqWAovK2LkecY7zXl4", "Freya (Female)"),
-            ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
-            ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female)"),
-            ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
-        ]
-        male_voices = [
-            ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
-            ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
-            ("nPczCjzI2devNBz1zQrb", "Brian (Male)"),
-            ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
-        ] if is_african else [
-            ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
-            ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
-            ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
-            ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
-        ]
+
+        # Prefer British/Neutral accented voices for South Asia + Africa (closer to local English)
+        # Prefer American/Neutral for Western markets
+        if is_south_asian:
+            female_voices = [
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
+                ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female, British)"),
+                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+            ]
+            male_voices = [
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
+                ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
+            ]
+        elif is_african:
+            female_voices = [
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
+                ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female, British)"),
+                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+            ]
+            male_voices = [
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
+                ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
+                ("nPczCjzI2devNBz1zQrb", "Brian (Male)"),
+            ]
+        elif is_middle_east:
+            female_voices = [
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
+                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
+            ]
+            male_voices = [
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
+            ]
+        else:
+            female_voices = [
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
+                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
+                ("jsCqWAovK2LkecY7zXl4", "Freya (Female)"),
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+            ]
+            male_voices = [
+                ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
+                ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
+            ]
 
         # Shuffle for variety across sessions
         random.shuffle(female_voices)
         random.shuffle(male_voices)
 
-        # Always enforce 2 female + 1 male, ignoring LLM alt_voices for gender balance
-        pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
+        # Enforce 2 female + 1 male gender balance
         female_count = 1 if primary_gender == "female" else 0
         male_count = 1 if primary_gender == "male" else 0
         need_female = 2 - female_count
         need_male = 1 - male_count
 
-        for vid, lbl in female_voices:
-            if need_female <= 0:
+        # Merge LLM alt candidates into the curated lists (prioritized first)
+        all_female = alt_candidates + female_voices
+        all_male = alt_candidates + male_voices
+
+        for vid, lbl in all_female:
+            if len(pool) >= 3 or need_female <= 0:
                 break
-            if vid not in seen_ids:
+            if vid not in seen_ids and ("male" not in lbl.lower() or "female" in lbl.lower()):
                 pool.append((vid, lbl))
                 seen_ids.add(vid)
                 need_female -= 1
-        for vid, lbl in male_voices:
-            if need_male <= 0:
+        for vid, lbl in all_male:
+            if len(pool) >= 3 or need_male <= 0:
                 break
-            if vid not in seen_ids:
+            if vid not in seen_ids and "male" in lbl.lower() and "female" not in lbl.lower():
                 pool.append((vid, lbl))
                 seen_ids.add(vid)
                 need_male -= 1
-        # Fill remaining if still short
+        # Fill any remaining slots from either list
         for vid, lbl in female_voices + male_voices:
             if len(pool) >= 3:
                 break
@@ -1185,22 +1259,8 @@ class AudioProducerAgent(BaseAgent):
         if tts_engine_override in ("murf", "elevenlabs", "edge-tts"):
             tts_engine = tts_engine_override
         else:
-            # Smart auto: non-English languages benefit from edge-tts locale-specific voices
-            _is_non_english = (
-                language
-                and language.lower().strip() not in ("english", "en", "")
-            )
-            _has_locale_voice = (
-                _is_non_english
-                and language.lower().strip() in LANGUAGE_TO_LOCALE
-            )
-            if _has_locale_voice:
-                tts_engine = "edge-tts"
-                logger.info(
-                    f"[{self.name}] Auto-selecting edge-tts for language '{language}' "
-                    f"(locale-specific voice available)"
-                )
-            elif self._has_elevenlabs_credits():
+            # Auto priority: ElevenLabs (best quality, multilingual) > Murf > edge-tts
+            if self._has_elevenlabs_credits():
                 has_quota = await self._check_elevenlabs_quota()
                 if has_quota:
                     tts_engine = "elevenlabs"
@@ -1226,8 +1286,6 @@ class AudioProducerAgent(BaseAgent):
                 el_voice_id = voice_selection["selected_voice"]["voice_id"]
                 api_params = voice_selection.get("elevenlabs_api_params", {})
                 el_model_id = api_params.get("model_id", ELEVENLABS_TTS_MODEL)
-                if el_model_id == "eleven_v3":
-                    el_model_id = ELEVENLABS_TTS_MODEL
                 el_voice_id = await self._validate_voice_id(el_voice_id)
                 logger.info(f"[{self.name}] Using ElevenLabs: voice={voice_name}, model={el_model_id}")
 
@@ -1374,17 +1432,52 @@ class AudioProducerAgent(BaseAgent):
                         
                 return result
             except Exception as e:
-                logger.error(f"[{self.name}] Failed {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}: {e}")
+                err_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)"
+                logger.error(f"[{self.name}] Failed {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}: {err_detail}", exc_info=True)
+
+                # Retry once on transient failures
+                try:
+                    logger.info(f"[{self.name}] Retrying {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}...")
+                    if tts_engine == "elevenlabs":
+                        result = await self._generate_elevenlabs(
+                            text=job["text"],
+                            voice_id=job.get("el_voice_id", el_voice_id),
+                            voice_settings=voice_settings,
+                            output_path=job["path"],
+                            model_id=el_model_id,
+                            skip_bgm=True,
+                        )
+                    elif tts_engine == "murf":
+                        result = await self._generate_murf_tts(
+                            text=job["text"], voice_id=job["murf_voice_id"],
+                            locale=job["murf_locale"], output_path=job["path"],
+                            style=job["murf_style"], skip_bgm=True,
+                        )
+                    else:
+                        result = await self._generate_edge_tts(
+                            text=job["text"], voice=job.get("edge_voice", edge_voice),
+                            output_path=job["path"], section_type=job["type"], skip_bgm=True,
+                        )
+                    result["variant_id"] = job["variant_id"]
+                    result["type"] = job["type"]
+                    result["theme"] = job.get("theme", "")
+                    result["voice_index"] = job.get("voice_index", 1)
+                    result["voice_label"] = job.get("voice_label", "Voice 1")
+                    logger.info(f"[{self.name}] Retry succeeded for v{job['variant_id']} voice{job.get('voice_index', 1)}")
+                    return result
+                except Exception:
+                    pass
+
                 return {
                     "variant_id": job["variant_id"],
                     "type": job["type"],
                     "theme": job.get("theme", ""),
                     "voice_index": job.get("voice_index", 1),
                     "voice_label": job.get("voice_label", "Voice 1"),
-                    "error": str(e),
+                    "error": err_detail,
                 }
 
-        semaphore = asyncio.Semaphore(5)
+        semaphore = asyncio.Semaphore(10)
 
         async def _limited(job: dict[str, Any]) -> dict[str, Any]:
             async with semaphore:

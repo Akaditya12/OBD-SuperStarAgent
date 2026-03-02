@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -66,6 +67,7 @@ class BaseAgent(ABC):
         user_prompt: str,
         max_tokens: int = 16384,
         json_output: bool = True,
+        timeout_seconds: int = 120,
     ) -> str:
         """Call Azure OpenAI and return the response text.
 
@@ -81,15 +83,22 @@ class BaseAgent(ABC):
         if json_output:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = await self.client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
-            max_completion_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **kwargs,
-        )
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=AZURE_OPENAI_DEPLOYMENT,
+                    max_completion_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    **kwargs,
+                ),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[{self.name}] Azure OpenAI call timed out after {timeout_seconds}s")
+            raise TimeoutError(f"LLM call timed out after {timeout_seconds}s")
 
         # Log token usage and finish reason for debugging
         choice = response.choices[0]

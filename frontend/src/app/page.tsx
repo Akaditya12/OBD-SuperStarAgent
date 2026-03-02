@@ -41,7 +41,7 @@ import type {
   HookPreviewResult,
   AudioResult,
 } from "@/lib/types";
-import { Languages, Music, Radio, Upload, VolumeX } from "lucide-react";
+import { Database, Languages, Music, Radio, Upload, VolumeX } from "lucide-react";
 import { forceDownload } from "@/lib/utils";
 
 type WizardStep = "input" | "running" | "results";
@@ -87,6 +87,11 @@ function HomePageContent() {
   const [promotionType, setPromotionType] = useState("obd_standard");
   const [ttsEngine, setTtsEngine] = useState<"auto" | "murf" | "elevenlabs" | "edge-tts">("auto");
   const [forceReanalyze, setForceReanalyze] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState<{
+    exact: boolean; exact_cached_at?: string;
+    partial: boolean; partial_cached_at?: string;
+  } | null>(null);
+  const cacheCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Handle ?product= URL param from sidebar clicks
   useEffect(() => {
@@ -166,6 +171,31 @@ function HomePageContent() {
         setAuthChecked(true);
       });
   }, [router]);
+
+  // ── Cache check (debounced) ──
+  useEffect(() => {
+    if (cacheCheckTimer.current) clearTimeout(cacheCheckTimer.current);
+    setCacheStatus(null);
+    setForceReanalyze(false);
+
+    if (!productText.trim() || !country || !telco) return;
+
+    cacheCheckTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/cache/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_text: productText, country, telco, language: language || undefined }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCacheStatus(data);
+        }
+      } catch { /* silent */ }
+    }, 150);
+
+    return () => { if (cacheCheckTimer.current) clearTimeout(cacheCheckTimer.current); };
+  }, [productText, country, telco, language]);
 
   // ── Update Step helper ──
   const updateStep = useCallback(
@@ -656,6 +686,7 @@ function HomePageContent() {
     setPromotionType("obd_standard");
     setTtsEngine("auto");
     setForceReanalyze(false);
+    setCacheStatus(null);
 
     // Save state
     setSaved(false);
@@ -881,20 +912,75 @@ function HomePageContent() {
               </div>
             </div>
 
-            {/* Re-analyse toggle */}
-            <label className="flex items-center gap-2.5 cursor-pointer group">
-              <div
-                role="switch"
-                aria-checked={forceReanalyze}
-                onClick={() => setForceReanalyze((v) => !v)}
-                className={`relative w-9 h-5 rounded-full transition-colors ${forceReanalyze ? "bg-[var(--accent)]" : "bg-[var(--card-border)]"}`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${forceReanalyze ? "translate-x-4" : ""}`} />
+            {/* Cache awareness banner */}
+            {cacheStatus && (cacheStatus.exact || cacheStatus.partial) && (
+              <div className={`p-4 rounded-2xl border ${cacheStatus.exact ? "bg-emerald-500/5 border-emerald-500/20" : "bg-blue-500/5 border-blue-500/20"}`}>
+                <div className="flex items-start gap-3">
+                  <Database className={`w-4 h-4 mt-0.5 shrink-0 ${cacheStatus.exact ? "text-emerald-500" : "text-blue-400"}`} />
+                  <div className="flex-1 min-w-0">
+                    {cacheStatus.exact ? (
+                      <>
+                        <p className="text-xs text-[var(--text-primary)] font-medium">
+                          Cached analysis found for this product + {country} / {telco}
+                        </p>
+                        <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                          Exact match. Pipeline will reuse this to save time.
+                          {cacheStatus.exact_cached_at && (
+                            <> Cached {new Date(cacheStatus.exact_cached_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}.</>
+                          )}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-[var(--text-primary)] font-medium">
+                          Previous market research found for {country} / {telco}
+                        </p>
+                        <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                          Different product, but market data can be reused. Fresh product analysis will still run.
+                          {cacheStatus.partial_cached_at && (
+                            <> Last researched {new Date(cacheStatus.partial_cached_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}.</>
+                          )}
+                        </p>
+                      </>
+                    )}
+                    <div className="flex items-center gap-2 mt-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setForceReanalyze(false)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                          !forceReanalyze
+                            ? "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
+                            : "text-[var(--text-secondary)] border border-[var(--card-border)] hover:border-emerald-500/30"
+                        }`}
+                      >
+                        {cacheStatus.exact ? "Use Cached" : "Reuse Market Data"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForceReanalyze(true)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                          forceReanalyze
+                            ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                            : "text-[var(--text-secondary)] border border-[var(--card-border)] hover:border-amber-500/30"
+                        }`}
+                      >
+                        Run Fresh Analysis
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <span className="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors select-none">
-                Re-run product &amp; market analysis
-              </span>
-            </label>
+            )}
+            {cacheStatus && !cacheStatus.exact && !cacheStatus.partial && country && telco && (
+              <div className="p-3 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
+                <div className="flex items-center gap-2.5">
+                  <Database className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                  <p className="text-[10px] text-[var(--text-tertiary)]">
+                    No cached data for {country} / {telco}. Fresh product &amp; market analysis will run.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Start button */}
             <button
@@ -936,7 +1022,15 @@ function HomePageContent() {
               Our 6-agent pipeline is crafting your scripts...
             </p>
           </div>
-          <PipelineProgress steps={progressSteps} />
+          <PipelineProgress
+            steps={progressSteps}
+            skippableAgents={["EvalPanel"]}
+            onSkipStep={(agent) => {
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ action: "skip_step", agent }));
+              }
+            }}
+          />
         </div>
       )}
 

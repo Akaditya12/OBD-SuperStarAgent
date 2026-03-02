@@ -36,6 +36,7 @@ from backend.database import (
     delete_comment,
     get_pipeline_config,
     save_pipeline_config,
+    check_cache_exists,
 )
 from backend.collaboration import (
     register_user,
@@ -105,6 +106,7 @@ class PipelineState:
     error_message: str = ""
     task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
     subscribers: list[WebSocket] = field(default_factory=list)
+    step_overrides: dict[str, str] = field(default_factory=dict)
 
 pipelines: dict[str, PipelineState] = {}
 
@@ -154,6 +156,7 @@ async def _run_pipeline_bg(
             language=language,
             tts_engine=tts_engine,
             force_reanalyze=force_reanalyze,
+            get_step_overrides=lambda: state.step_overrides,
         )
         session_id = result.get("session_id", state.session_id)
         result["country"] = country
@@ -657,6 +660,22 @@ async def extract_text_from_file(file: UploadFile = File(...)):
 
 
 # ── Background Pipeline Endpoints ──
+
+
+@app.post("/api/cache/check")
+async def cache_check(request: Request):
+    """Check if cached analysis exists for a product+country+telco combo."""
+    body = await request.json()
+    product_text = body.get("product_text", "")
+    country = body.get("country", "")
+    telco = body.get("telco", "")
+    language = body.get("language")
+
+    if not product_text or not country or not telco:
+        return {"cached": False}
+
+    result = check_cache_exists(product_text, country, telco, language)
+    return result
 
 
 @app.post("/api/generate/start")
@@ -1459,12 +1478,19 @@ async def websocket_progress(ws: WebSocket, session_id: str):
     # Subscribe for live updates
     state.subscribers.append(ws)
     try:
-        # Keep connection alive until client disconnects or pipeline finishes
         while True:
-            # We just wait for the client to disconnect; all sending is done
-            # from _run_pipeline_bg via the subscribers list
             try:
-                await ws.receive_text()
+                raw = await ws.receive_text()
+                try:
+                    msg = json.loads(raw)
+                    action = msg.get("action")
+                    if action == "skip_step":
+                        agent = msg.get("agent", "")
+                        if agent and state.status == "running":
+                            state.step_overrides[agent] = "skip"
+                            logger.info(f"Step override: skip {agent} for session {session_id}")
+                except (json.JSONDecodeError, TypeError):
+                    pass
             except WebSocketDisconnect:
                 break
     finally:

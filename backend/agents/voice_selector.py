@@ -37,7 +37,19 @@ CRITICAL SELECTION CRITERIA (in order of importance):
 
 For NON-ENGLISH markets, prefer voices with native-sounding accents (e.g. Indian English
 for India, not American English). Pick voices whose labels/description mention the
-target region or accent.
+target region or accent. The eleven_multilingual_v2 model makes ANY voice speak naturally
+in the target language, so accent/region fit matters more than language capability.
+
+SOUTH ASIAN MARKET GUIDANCE (India, Bangladesh, Sri Lanka, Nepal, Pakistan):
+- For India, prefer British-accented or Neutral-accented voices over American --
+  Indian English is closer to British English. Voices with neutral/British accents
+  sound more natural when speaking Hindi, Tamil, Bengali, Telugu via multilingual_v2.
+- Select voices described as "warm", "approachable", or "natural" -- avoid overly
+  deep/dramatic Western voices that sound out of place for Indian telecom promos.
+- Recommended voices: Charlotte (Neutral), Lily (British), Dorothy (British),
+  Daniel (British), George (British), Alice (British).
+- For regional languages (Hindi, Tamil, Telugu, Bengali, Kannada, Malayalam,
+  Marathi, Gujarati), eleven_multilingual_v2 is MANDATORY.
 
 AFRICAN MARKET GUIDANCE (critical -- majority of our client base):
 - For East/Southern African countries (Kenya, Tanzania, Uganda, Rwanda, Zambia, Zimbabwe,
@@ -53,17 +65,20 @@ AFRICAN MARKET GUIDANCE (critical -- majority of our client base):
   Kinyarwanda, Wolof, Lingala, etc.), the eleven_multilingual_v2 model is MANDATORY --
   it handles these languages far better than other models.
 
-ElevenLabs Voice Settings (PREMIUM tuning for maximum naturalness):
-- stability: 0.30 to 0.40 (more expressive, human-like delivery -- NOT robotic)
+ElevenLabs Voice Settings for eleven_v3 (PREMIUM tuning for OBD clarity):
+- stability: 0.45 to 0.55 (clear pronunciation, especially for local languages -- avoid too low which causes mumbling)
 - similarity_boost: 0.75 to 0.85 (high fidelity to voice character)
-- style: 0.40 to 0.55 (moderate expressiveness for promotional punch)
-- speed: 0.7 to 1.2 (speech speed, 1.0 = normal)
+- style: 0.25 to 0.40 (moderate expressiveness -- too high causes distortion in local languages)
+- speed: 0.95 to 1.05 (natural OBD pace -- customers need to understand every word on a phone call)
 
 ElevenLabs Model IDs (MUST use one of these):
-- "eleven_multilingual_v2" -- PREFERRED. Best multilingual support, works with all plans, excellent expressiveness
-- "eleven_turbo_v2_5" -- faster generation, good quality, lower latency
+- "eleven_v3" -- PREFERRED. Most advanced model, 70+ languages, highest emotional range and expressiveness.
+  Supports ALL African languages (Swahili, Yoruba, Hausa, Somali, Lingala, etc.),
+  ALL South Asian languages (Hindi, Tamil, Telugu, Bengali, Kannada, Malayalam, Marathi, Gujarati, Punjabi, etc.),
+  Arabic, Portuguese, Spanish, French, Indonesian, Filipino, Malay, and more.
+- "eleven_multilingual_v2" -- Fallback. 29 languages, 10K char limit, very stable.
 
-IMPORTANT: Always recommend "eleven_multilingual_v2" as the model_id. Do NOT recommend "eleven_v3".
+IMPORTANT: Always recommend "eleven_v3" as the model_id for maximum language coverage.
 
 Output valid JSON:
 {
@@ -110,22 +125,22 @@ Output valid JSON:
 
 
 _CURATED_ELEVENLABS_VOICES: list[dict[str, Any]] = [
-    # Female voices
-    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Soft, warm, friendly female voice with clear enunciation", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "description": "Calm, confident female voice ideal for narration and promotions", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, engaging female voice with natural delivery, good for multilingual content", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "jsCqWAovK2LkecY7zXl4", "name": "Freya", "description": "Expressive, lively female voice with personality", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined female voice with British accent, excellent for East/Southern African markets", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive female voice for diverse content and multilingual campaigns", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy", "description": "Clear, pleasant female voice, warm tone suitable for African and international markets", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade"},
-    {"voice_id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice", "description": "Natural, approachable female voice, works well with multilingual v2 for local accents", "labels": {"accent": "British", "gender": "female", "age": "middle-aged"}, "category": "premade"},
-    # Male voices
-    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative male voice suitable for professional narration, British accent matches well with African English", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
-    {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "description": "Deep, clear male voice with strong presence", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
-    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy male voice with British accent, excellent for East/Southern African campaigns", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade"},
-    {"voice_id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "description": "Confident male voice, clear articulation, works well with multilingual v2 for diverse accents", "labels": {"accent": "American", "gender": "male", "age": "young"}, "category": "premade"},
-    {"voice_id": "nPczCjzI2devNBz1zQrb", "name": "Brian", "description": "Deep, resonant male voice with warmth, good for promotional content across markets", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
-    {"voice_id": "cjVigY5qzO86Huf0OWal", "name": "Eric", "description": "Friendly, approachable male voice, natural delivery for telecom promotions", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade"},
+    # Female voices -- diverse accents for regional targeting
+    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Soft, warm, friendly female voice. Clear enunciation, natural for Western markets and general use.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "europe", "general"]},
+    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "description": "Calm, confident female voice ideal for narration and promotions.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "general"]},
+    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, engaging voice with neutral accent. Excellent multilingual capability -- adapts naturally to Indian English, African English, and local languages via multilingual_v2.", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["south_asia", "middle_east", "general"]},
+    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined British-accented voice. Sounds natural and trustworthy for East/Southern African markets (Kenya, Tanzania, Uganda, Zambia, South Africa). Good for Indian English as well.", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["east_africa", "southern_africa", "south_asia"]},
+    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive voice. Adapts well to different accents with multilingual_v2 -- suitable for Hindi, Swahili, Yoruba, and other languages.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["general", "south_asia", "west_africa"]},
+    {"voice_id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy", "description": "Clear, pleasant British-accented voice. Warm tone works well for African and South Asian markets where British English is the norm.", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["east_africa", "west_africa", "south_asia"]},
+    {"voice_id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice", "description": "Natural, approachable British voice. Works well with multilingual_v2 for local language accents -- Swahili, Hindi, Tamil, Bengali, Arabic.", "labels": {"accent": "British", "gender": "female", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "south_asia", "middle_east"]},
+    {"voice_id": "jsCqWAovK2LkecY7zXl4", "name": "Freya", "description": "Expressive, lively female voice with personality. Good for energetic promotional campaigns.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "europe"]},
+    # Male voices -- diverse accents for regional targeting
+    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy British-accented male voice. Excellent for East/Southern African campaigns (Kenya, Tanzania) and South Asian markets (India, Bangladesh). Sounds authoritative yet approachable.", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "southern_africa", "south_asia"]},
+    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative British male voice. Professional narration quality. British accent matches naturally with African English and Indian English.", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "west_africa", "south_asia"]},
+    {"voice_id": "cjVigY5qzO86Huf0OWal", "name": "Eric", "description": "Friendly, approachable male voice with natural delivery. Works well for telecom promotions across emerging markets.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["general", "south_asia", "west_africa"]},
+    {"voice_id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "description": "Confident male voice with clear articulation. Works well with multilingual_v2 for Hindi, Swahili, Arabic, and other languages.", "labels": {"accent": "American", "gender": "male", "age": "young"}, "category": "premade", "best_for_regions": ["general", "middle_east"]},
+    {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "description": "Deep, clear male voice with strong authoritative presence.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["americas", "europe"]},
+    {"voice_id": "nPczCjzI2devNBz1zQrb", "name": "Brian", "description": "Deep, resonant male voice with warmth. Good for promotional content across markets.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["americas", "general"]},
 ]
 
 
@@ -136,25 +151,34 @@ class VoiceSelectorAgent(BaseAgent):
     description = "Selects and configures the best ElevenLabs voice for the campaign"
 
     async def _fetch_available_voices(self) -> list[dict[str, Any]]:
-        """Fetch available voices from ElevenLabs API."""
+        """Fetch all available voices from ElevenLabs (VoiceLab + premade)."""
         logger.info(f"[{self.name}] Fetching available voices from ElevenLabs")
 
+        all_voices: list[dict[str, Any]] = []
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{ELEVENLABS_BASE_URL}/v2/voices",
-                headers={"xi-api-key": ELEVENLABS_API_KEY},
-                params={"page_size": 100},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+            # Fetch VoiceLab + premade voices (paginated)
+            next_cursor: str | None = ""
+            while next_cursor is not None:
+                params: dict[str, Any] = {"page_size": 100}
+                if next_cursor:
+                    params["next_cursor"] = next_cursor
+                response = await client.get(
+                    f"{ELEVENLABS_BASE_URL}/v2/voices",
+                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    params=params,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+                all_voices.extend(data.get("voices", []))
+                next_cursor = data.get("next_cursor") or None
+                if len(all_voices) >= 300:
+                    break
 
-        voices = data.get("voices", [])
-        logger.info(f"[{self.name}] Found {len(voices)} available voices")
+        logger.info(f"[{self.name}] Found {len(all_voices)} available voices")
 
-        # Extract relevant metadata for each voice
         simplified = []
-        for v in voices:
+        for v in all_voices:
             simplified.append({
                 "voice_id": v.get("voice_id", ""),
                 "name": v.get("name", ""),

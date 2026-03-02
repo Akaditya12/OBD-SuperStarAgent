@@ -8,26 +8,30 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  SkipForward,
 } from "lucide-react";
 
 export interface ProgressStep {
   agent: string;
   label: string;
-  status: "pending" | "started" | "completed" | "error";
+  status: "pending" | "started" | "completed" | "error" | "skipped";
   message: string;
   data?: Record<string, unknown>;
 }
 
 interface PipelineProgressProps {
   steps: ProgressStep[];
+  onSkipStep?: (agent: string) => void;
+  skippableAgents?: string[];
 }
 
-export default function PipelineProgress({ steps }: PipelineProgressProps) {
+export default function PipelineProgress({ steps, onSkipStep, skippableAgents = [] }: PipelineProgressProps) {
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
 
-  const completedCount = steps.filter((s) => s.status === "completed").length;
+  const doneCount = steps.filter((s) => s.status === "completed" || s.status === "skipped").length;
   const totalCount = steps.length;
-  const percent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const percent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  const isRunning = steps.some((s) => s.status === "started");
 
   return (
     <div className="space-y-4">
@@ -38,7 +42,7 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
             Pipeline Progress
           </span>
           <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
-            {completedCount}/{totalCount} steps · {percent}%
+            {doneCount}/{totalCount} steps · {percent}%
           </span>
         </div>
         <div className="h-1.5 rounded-full bg-[var(--card-border)] overflow-hidden">
@@ -58,13 +62,18 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
           const isLast = idx === steps.length - 1;
           const isExpanded = expandedStep === idx;
 
+          const isSkipped = step.status === "skipped";
+          const canSkip = isRunning && step.status === "pending" && skippableAgents.includes(step.agent) && !!onSkipStep;
+
           const dotStyle = step.status === "completed"
             ? "border-[var(--success)]/30 bg-[var(--success)]/10"
             : step.status === "started"
               ? "border-[var(--accent)]/30 bg-[var(--accent)]/10 animate-pulse"
               : step.status === "error"
                 ? "border-[var(--error)]/30 bg-[var(--error)]/10"
-                : "border-[var(--card-border)] bg-[var(--card)]";
+                : isSkipped
+                  ? "border-gray-400/30 bg-gray-400/10 border-dashed"
+                  : "border-[var(--card-border)] bg-[var(--card)]";
 
           const lineColor = step.status === "completed"
             ? "bg-[var(--success)]/30"
@@ -72,7 +81,9 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
               ? "bg-[var(--accent)]/30"
               : step.status === "error"
                 ? "bg-[var(--error)]/30"
-                : "bg-[var(--card-border)]";
+                : isSkipped
+                  ? "bg-gray-400/30"
+                  : "bg-[var(--card-border)]";
 
           const textColor = step.status === "completed"
             ? "text-[var(--success)]"
@@ -80,7 +91,9 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
               ? "text-[var(--accent)]"
               : step.status === "error"
                 ? "text-[var(--error)]"
-                : "text-[var(--text-tertiary)]";
+                : isSkipped
+                  ? "text-gray-400"
+                  : "text-[var(--text-tertiary)]";
 
           const icon = step.status === "completed"
             ? <CheckCircle2 className="w-4 h-4 text-[var(--success)]" />
@@ -88,7 +101,9 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
               ? <Loader2 className="w-4 h-4 text-[var(--accent)] animate-spin" />
               : step.status === "error"
                 ? <AlertCircle className="w-4 h-4 text-[var(--error)]" />
-                : <Circle className="w-4 h-4 text-[var(--text-tertiary)]" />;
+                : isSkipped
+                  ? <SkipForward className="w-4 h-4 text-gray-400" />
+                  : <Circle className="w-4 h-4 text-[var(--text-tertiary)]" />;
 
           return (
             <div key={`${step.agent}-${idx}`} className="relative flex gap-4">
@@ -108,37 +123,65 @@ export default function PipelineProgress({ steps }: PipelineProgressProps) {
 
               {/* Content */}
               <div className={`flex-1 pb-5 ${isLast ? "pb-0" : ""}`}>
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() =>
                     setExpandedStep(isExpanded ? null : idx)
                   }
-                  className="w-full text-left flex items-center justify-between"
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpandedStep(isExpanded ? null : idx); } }}
+                  className="w-full text-left flex items-center justify-between cursor-pointer"
                 >
-                  <div>
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span
-                      className={`text-sm font-medium ${step.status === "pending"
+                      className={`text-sm font-medium ${
+                        step.status === "pending"
                           ? "text-[var(--text-tertiary)]"
-                          : "text-[var(--text-primary)]"
-                        }`}
+                          : isSkipped
+                            ? "text-gray-400"
+                            : "text-[var(--text-primary)]"
+                      }`}
                     >
                       {step.label}
                     </span>
-                    {step.message && step.status !== "pending" && (
-                      <p className={`text-[11px] mt-0.5 ${textColor}`}>
+                    {isSkipped && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded bg-gray-400/10 text-gray-400 border border-gray-400/20 border-dashed">
+                        Skipped
+                      </span>
+                    )}
+                    {canSkip && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onSkipStep!(step.agent); }}
+                        className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                      >
+                        <SkipForward className="w-3 h-3" />
+                        Skip
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {step.message && step.status !== "pending" && !isSkipped && (
+                      <p className={`text-[11px] ${textColor} text-right hidden sm:block`}>
                         {step.message}
                       </p>
                     )}
+                    {step.data && Object.keys(step.data).length > 0 && (
+                      <span className="p-1 text-[var(--text-tertiary)]">
+                        {isExpanded ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
+                      </span>
+                    )}
                   </div>
-                  {step.data && Object.keys(step.data).length > 0 && (
-                    <span className="p-1 text-[var(--text-tertiary)]">
-                      {isExpanded ? (
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      )}
-                    </span>
-                  )}
-                </button>
+                </div>
+                {step.message && step.status !== "pending" && !isSkipped && (
+                  <p className={`text-[11px] mt-0.5 ${textColor} sm:hidden`}>
+                    {step.message}
+                  </p>
+                )}
 
                 {/* Expanded data */}
                 {isExpanded && step.data && (
