@@ -50,7 +50,10 @@ Also use CAPITALIZATION for emphasis and ellipses (...) for dramatic pauses.
 
 RULES:
 - Total script (hook+body+cta) MUST be under {max_words} words (~30 seconds)
-- Use the local language mixed with English where appropriate
+- Use the local language words but ALWAYS write them in LATIN/ROMAN script (English letters). \
+NEVER use native scripts like Amharic (ገ), Arabic (ع), Hindi (ह), Thai (ก), etc. \
+Transliterate all local language words into English characters. \
+Example: write "Selam" not "ሰላም", write "Namaste" not "नमस्ते", write "Marhaba" not "مرحبا".
 - DTMF instruction must be crystal clear
 - Each variant must have a DIFFERENT creative angle
 
@@ -193,9 +196,10 @@ class ScriptWriterAgent(BaseAgent):
         lang_instruction = ""
         if language_override:
             lang_instruction = (
-                f"\n\nCRITICAL LANGUAGE REQUIREMENT: ALL scripts MUST be written in {language_override}. "
-                f"Use {language_override} as the primary language for hook, body, cta, fallbacks, "
-                f"closure, and full_script. Mix with English only for brand names and technical terms."
+                f"\n\nCRITICAL LANGUAGE REQUIREMENT: ALL scripts MUST use {language_override} words and phrases. "
+                f"However, ALWAYS write using LATIN/ROMAN letters (English alphabet) — transliterate, "
+                f"do NOT use native script characters. For example if {language_override} is Amharic, "
+                f"write 'Selam' not 'ሰላም'. Mix with English for brand names and technical terms."
             )
 
         user_prompt = f"""\
@@ -312,8 +316,9 @@ Under {max_words} words per script. Output valid JSON with "scripts" array of {c
         lang_instruction = ""
         if language_override:
             lang_instruction = (
-                f"\n\nCRITICAL: ALL scripts MUST remain in {language_override}. "
-                f"Do not switch to any other language."
+                f"\n\nCRITICAL: ALL scripts MUST remain in {language_override} words, "
+                f"but written in LATIN/ROMAN letters (transliterated). "
+                f"Do NOT use native script characters."
             )
 
         scripts = previous_scripts.get("scripts", [])

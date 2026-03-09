@@ -98,17 +98,19 @@ export default function Sidebar() {
         router.push("/login");
     };
 
+    if (pathname === "/login") return null;
+
     const navContent = (
         <div className="flex flex-col h-full">
             {/* Logo */}
             <div className="flex items-center gap-3 px-4 py-5 border-b border-[var(--card-border)]">
-                <BNGLogo size={36} className="flex-shrink-0" />
+                <BNGLogo size={88} className="flex-shrink-0" />
                 {!collapsed && (
                     <div className="animate-fade-in">
                         <h1 className="text-sm font-bold text-[var(--text-primary)] leading-tight">
                             OBD SuperStar
                         </h1>
-                        <p className="text-[10px] text-[var(--text-tertiary)]">by Black &amp; Green</p>
+                        <p className="text-[10px] text-[var(--text-tertiary)]">by black<span style={{ color: "#22c55e" }} className="font-bold">N</span>green</p>
                     </div>
                 )}
             </div>

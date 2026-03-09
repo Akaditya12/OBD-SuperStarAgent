@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import {
-  Mic2,
   User,
   Globe,
   Lightbulb,
   BarChart3,
   Music,
   Settings,
+  Shield,
 } from "lucide-react";
 import type { VoiceSelection, HookPreviewResult } from "@/lib/types";
 
@@ -65,6 +65,48 @@ function getEngineBadgeClass(engine?: string): string {
   return "bg-gray-500/10 text-gray-600 border border-gray-500/20";
 }
 
+function getVoiceRationale(
+  voiceIdx: number,
+  voiceSelection: VoiceSelection,
+  voicePool: { voice_label: string; voice_index: number; el_voice_id?: string }[],
+): string {
+  const selectedVoice = voiceSelection?.selected_voice;
+  const alternatives = voiceSelection?.alternative_voices || [];
+  const poolVoice = voicePool[voiceIdx];
+  const voiceName = poolVoice?.voice_label || selectedVoice?.name || "Voice";
+  const poolVoiceId = poolVoice?.el_voice_id || "";
+
+  if (voiceIdx === 0) {
+    const rationale = voiceSelection?.rationale || "";
+    if (rationale) return rationale;
+    const desc = selectedVoice?.description || "";
+    const accent = selectedVoice?.accent ? `${selectedVoice.accent}-accented` : "";
+    const gender = selectedVoice?.gender || "";
+    return `${voiceName} is the primary voice — a ${accent} ${gender} voice selected for this campaign. ${desc}`.trim();
+  }
+
+  // Match by voice_id first, then by name substring
+  const voiceNameClean = voiceName.replace(/\s*\(.*\)/, "").trim().toLowerCase();
+  const matched = alternatives.find((alt) => {
+    if (poolVoiceId && alt.voice_id === poolVoiceId) return true;
+    const altName = (alt.name || "").toLowerCase();
+    return altName && voiceNameClean && (altName.includes(voiceNameClean) || voiceNameClean.includes(altName));
+  });
+
+  if (matched?.reason) {
+    return matched.reason;
+  }
+
+  const label = voiceName.toLowerCase();
+  const gender = label.includes("female") ? "female" : label.includes("male") ? "male" : "";
+  const accent = label.includes("british") ? "British" : label.includes("neutral") ? "Neutral" : label.includes("american") ? "American" : label.includes("australian") ? "Australian" : "";
+  const parts: string[] = [];
+  if (gender) parts.push(`${gender} voice`);
+  if (accent) parts.push(`with ${accent} accent`);
+  parts.push("providing demographic diversity in the voice pool");
+  return `${voiceName} — ${parts.join(", ")}.`;
+}
+
 export default function VoiceInfoPanel({
   voiceSelection,
   ttsEngine,
@@ -87,15 +129,27 @@ export default function VoiceInfoPanel({
   const currentPoolVoice = voicePool[activeVoiceIdx];
   const currentVoiceName = currentPoolVoice?.voice_label || voiceSelection?.selected_voice?.name || "Voice";
 
-  const rawRationale = voiceSelection?.rationale || "";
-  const rationale = (() => {
-    if (voicePool.length > 0) {
-      const engineLabel = getEngineLabel(actualEngine || "");
-      return `${currentVoiceName} was selected by the ${engineLabel} engine based on the campaign's target market, language, and audience profile. ${
-        productionNotes || "The voice is optimized for clarity, warmth, and natural delivery in promotional OBD calls."
-      }`;
-    }
-    return rawRationale;
+  const selectedVoice = voiceSelection?.selected_voice;
+  const modelId = voiceSelection?.elevenlabs_api_params?.model_id || "";
+  const voiceId = currentPoolVoice?.el_voice_id || selectedVoice?.voice_id || "";
+
+  const rationale = getVoiceRationale(activeVoiceIdx, voiceSelection, voicePool);
+
+  const genderLabel = (() => {
+    if (activeVoiceIdx === 0) return selectedVoice?.gender || "";
+    const lbl = currentVoiceName.toLowerCase();
+    if (lbl.includes("female")) return "Female";
+    if (lbl.includes("male")) return "Male";
+    return "";
+  })();
+
+  const accentLabel = (() => {
+    if (activeVoiceIdx === 0) return selectedVoice?.accent || "";
+    const lbl = currentVoiceName.toLowerCase();
+    if (lbl.includes("british")) return "British";
+    if (lbl.includes("neutral")) return "Neutral";
+    if (lbl.includes("american")) return "American";
+    return "";
   })();
 
   return (
@@ -140,50 +194,77 @@ export default function VoiceInfoPanel({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-base font-semibold text-[var(--text-primary)]">
-                {currentPoolVoice?.voice_label || voiceSelection?.selected_voice?.name || "Voice"}
+                {currentVoiceName}
               </span>
               {actualEngine && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20">
                   {getEngineLabel(actualEngine)}
                 </span>
               )}
+              {activeVoiceIdx === 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                  Primary
+                </span>
+              )}
             </div>
             <p className="text-xs text-[var(--text-secondary)] mt-1">
-              {voicePool.length > 0
-                ? `Voice ${(currentPoolVoice?.voice_index || 0)} of ${voicePool.length} available for this campaign`
-                : voiceSelection?.selected_voice?.description || ""}
+              Voice {(currentPoolVoice?.voice_index || 1)} of {voicePool.length || 1} available for this campaign
             </p>
-            <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-tertiary)]">
-              <span className="flex items-center gap-1">
-                <Globe className="w-3 h-3" />
-                {voiceSelection?.selected_voice?.language || "Multilingual"}
-              </span>
-              {voiceSelection?.selected_voice?.accent && (
-                <span>{voiceSelection.selected_voice.accent} accent</span>
+            <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-tertiary)] flex-wrap">
+              {selectedVoice?.language && (
+                <span className="flex items-center gap-1">
+                  <Globe className="w-3 h-3" />
+                  {modelId ? `Multilingual via ${modelId}` : selectedVoice.language}
+                  {selectedVoice.language !== "English" && selectedVoice.language !== "Multilingual" && (
+                    <> (including {selectedVoice.language})</>
+                  )}
+                </span>
+              )}
+              {accentLabel && (
+                <span className="px-1.5 py-0.5 rounded bg-[var(--input-bg)] border border-[var(--card-border)]">
+                  {accentLabel} accent
+                </span>
+              )}
+              {genderLabel && (
+                <span className="px-1.5 py-0.5 rounded bg-[var(--input-bg)] border border-[var(--card-border)]">
+                  {genderLabel}
+                </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* TTS Engine Detail */}
+        {/* TTS Engine + Model Verification */}
         {actualEngine && (
           <div className="p-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)]">
             <div className="flex items-center gap-2 text-xs">
-              <Music className="w-3.5 h-3.5 text-[var(--accent)]" />
-              <span className="text-[var(--text-secondary)] font-medium">Rendering Engine</span>
+              <Shield className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span className="text-[var(--text-secondary)] font-medium">Engine Verification</span>
             </div>
-            <div className="mt-1.5 grid grid-cols-2 gap-2 text-[10px]">
+            <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
               <div>
                 <span className="text-[var(--text-tertiary)]">Engine:</span>{" "}
                 <span className="text-[var(--text-primary)] font-mono">{getEngineLabel(actualEngine)}</span>
               </div>
               <div>
                 <span className="text-[var(--text-tertiary)]">Voices:</span>{" "}
-                <span className="text-[var(--text-primary)] font-mono">{voicePool.length || 1} available</span>
+                <span className="text-[var(--text-primary)] font-mono">{voicePool.length || 1} in pool</span>
               </div>
+              {modelId && (
+                <div>
+                  <span className="text-[var(--text-tertiary)]">Model:</span>{" "}
+                  <span className="text-[var(--text-primary)] font-mono">{modelId}</span>
+                </div>
+              )}
+              {voiceId && (
+                <div>
+                  <span className="text-[var(--text-tertiary)]">Voice ID:</span>{" "}
+                  <span className="text-[var(--text-primary)] font-mono text-[9px]">{voiceId}</span>
+                </div>
+              )}
               {edgeVoice && (
                 <div className="col-span-2">
-                  <span className="text-[var(--text-tertiary)]">Voice ID:</span>{" "}
+                  <span className="text-[var(--text-tertiary)]">Edge Voice:</span>{" "}
                   <span className="text-[var(--text-primary)] font-mono">{edgeVoice}</span>
                 </div>
               )}
@@ -196,7 +277,7 @@ export default function VoiceInfoPanel({
           <div className="p-3 rounded-xl bg-[var(--card)] border border-[var(--card-border)]">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--warning)] flex items-center gap-1">
               <Lightbulb className="w-3 h-3" />
-              Why This Voice Was Chosen
+              Why {currentVoiceName}
             </span>
             <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
               {rationale}

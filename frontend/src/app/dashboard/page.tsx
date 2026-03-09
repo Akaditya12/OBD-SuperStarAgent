@@ -76,7 +76,7 @@ export default function DashboardPage() {
           router.push("/login");
         }
       })
-      .catch(() => setAuthChecked(true));
+      .catch(() => router.push("/login"));
   }, [router]);
 
   // ── Load campaigns (only after auth is confirmed) ──

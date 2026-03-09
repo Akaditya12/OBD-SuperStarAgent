@@ -59,7 +59,7 @@ export default function ScriptToVoicePage() {
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => { if (d.authenticated) setAuthChecked(true); else router.push("/login"); })
-      .catch(() => setAuthChecked(true));
+      .catch(() => router.push("/login"));
   }, [router]);
 
   const [step, setStep] = useState<Step>("input");

@@ -57,7 +57,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: "midnight",
+  theme: "light",
   setTheme: () => {},
   themes: THEMES,
 });
@@ -69,7 +69,7 @@ export function useTheme() {
 const STORAGE_KEY = "obd-theme";
 
 export default function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>("midnight");
+  const [theme, setThemeState] = useState<ThemeId>("light");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { LogIn, AlertCircle, Loader2 } from "lucide-react";
 import BNGLogo from "@/components/BNGLogo";
@@ -11,6 +11,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => { if (d.authenticated) router.push("/"); })
+      .catch(() => {});
+  }, [router]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -45,10 +52,10 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="mx-auto mb-4 flex justify-center">
-            <BNGLogo size={56} />
+            <BNGLogo size={72} />
           </div>
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">OBD SuperStar Agent</h1>
-          <p className="text-xs text-[var(--accent)] font-medium mt-1">by Black &amp; Green</p>
+          <p className="text-xs text-[var(--accent)] font-medium mt-1">by black<span style={{ color: "#22c55e" }} className="font-bold">N</span>green</p>
           <p className="text-sm text-[var(--muted)] mt-2">
             Sign in to access the platform
           </p>
@@ -121,7 +128,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-[var(--muted)] mt-6">
-          Powered by BNG &middot; Touching Billions of Lives
+          Powered by black<span style={{ color: "#22c55e" }} className="font-bold">N</span>green &middot; Touching Billions of Lives
         </p>
       </div>
     </div>

@@ -5,12 +5,12 @@ import ToastProvider from "@/components/ToastProvider";
 import ThemeProvider from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
-  title: "OBD SuperStar Agent — BNG AI Campaign Generator",
+  title: "OBD SuperStar Agent — blackNgreen AI Campaign Generator",
   description:
-    "Black & Green (BNG) AI-powered multi-agent system for generating culturally-relevant OBD promotional scripts and audio recordings for telecom operators across 100+ countries.",
+    "blackNgreen AI-powered multi-agent system for generating culturally-relevant OBD promotional scripts and audio recordings for telecom operators across 100+ countries.",
   keywords: [
+    "blackNgreen",
     "BNG",
-    "Black and Green",
     "OBD",
     "AI",
     "scripts",
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     "Magic Voice",
   ],
   openGraph: {
-    title: "OBD SuperStar Agent — by BNG",
+    title: "OBD SuperStar Agent — by blackNgreen",
     description:
       "AI-powered OBD campaign generation for telecom operators. Create scripts, audio, and promotions for EVA, SmartConnect, Call Signature, and more.",
     type: "website",

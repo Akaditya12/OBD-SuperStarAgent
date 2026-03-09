@@ -671,8 +671,8 @@ async def cache_check(request: Request):
     telco = body.get("telco", "")
     language = body.get("language")
 
-    if not product_text or not country or not telco:
-        return {"cached": False}
+    if not country or not telco:
+        return {"exact": False, "partial": False}
 
     result = check_cache_exists(product_text, country, telco, language)
     return result
@@ -1676,6 +1676,10 @@ async def translate_script(request: Request):
         system_prompt = (
             "You are a professional translator specializing in telecom marketing scripts. "
             "Translate the given text accurately and naturally to English.\n\n"
+            "IMPORTANT: The text may be written in TRANSLITERATED form — i.e. a local language "
+            "(like Amharic, Swahili, Hindi, Arabic, etc.) spelled using Latin/Roman/English letters "
+            "instead of native script. For example, Amharic written as 'Selam indehal betam busy tihonish' "
+            "instead of 'ሰላም እንደሃል በጣም busy ትሆንሽ'. You MUST recognize and translate these correctly.\n\n"
             "RULES:\n"
             "1. Produce a fluent, natural English translation -- NOT a word-for-word literal translation.\n"
             "2. Preserve the original meaning, persuasive tone, and promotional intent.\n"
@@ -1684,7 +1688,7 @@ async def translate_script(request: Request):
             "[short pause], [cheerfully], [whispers], etc. -- translate ONLY the spoken words.\n"
             "5. Preserve brand names, product names, numbers, and URLs exactly as they appear.\n"
             "6. If the text is already in English, return it as-is (still strip any tags).\n"
-            "7. Detect the source language automatically if not provided.\n\n"
+            "7. Use the source_language hint if provided to help identify the transliterated language.\n\n"
             "Return valid JSON: {\"translated\": \"the full English translation\", "
             "\"source_language\": \"detected language name\"}"
         )

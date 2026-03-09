@@ -1083,11 +1083,13 @@ class AudioProducerAgent(BaseAgent):
         country: str,
         language: str | None,
     ) -> list[tuple[str, str]]:
-        """Build a pool of 3 diverse ElevenLabs voices.
+        """Build a pool of 3 diverse ElevenLabs voices (2F + 1M).
 
-        Uses LLM-selected alternatives first, then fills from a curated
-        list of known-good premium voices with gender diversity.
+        Priority: LLM-selected alternatives > API-fetched premium voices
+        > region-aware curated fallbacks. Shuffled each session for variety.
         """
+        import random
+
         fallback_gender = ""
         if not primary_voice_id or not primary_voice_id.strip():
             from backend.agents.voice_selector import _CURATED_ELEVENLABS_VOICES
@@ -1106,48 +1108,100 @@ class AudioProducerAgent(BaseAgent):
         seen_ids = {primary_voice_id}
         pool: list[tuple[str, str]] = [(primary_voice_id, primary_name)]
 
-        # Collect LLM-selected alternatives as candidates (used after gender balancing)
-        alt_candidates: list[tuple[str, str]] = []
+        # Collect LLM-selected alternatives as high-priority candidates
+        alt_candidates: list[tuple[str, str, str]] = []
         for alt in voice_selection.get("alternative_voices", []):
             alt_id = alt.get("voice_id", "")
             alt_name = alt.get("name", "Alt Voice")
             if alt_id and alt_id not in seen_ids:
-                alt_candidates.append((alt_id, alt_name))
+                gender_hint = "female" if any(w in alt_name.lower() for w in ["female", "woman", "girl"]) else (
+                    "male" if any(w in alt_name.lower() for w in ["male", "man", "boy"]) else ""
+                )
+                alt_candidates.append((alt_id, alt_name, gender_hint))
                 seen_ids.add(alt_id)
 
-        # ── Build region-aware curated voices for gender-balanced filling ──
+        # ── Try fetching premium voices from API for more variety ──
+        api_female: list[tuple[str, str]] = []
+        api_male: list[tuple[str, str]] = []
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{ELEVENLABS_BASE_URL}/v2/voices",
+                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    params={"page_size": 100},
+                    timeout=10.0,
+                )
+                if resp.status_code == 200:
+                    voices = resp.json().get("voices", [])
+                    for v in voices:
+                        vid = v.get("voice_id", "")
+                        if not vid or vid in seen_ids:
+                            continue
+                        name = v.get("name", "")
+                        labels = v.get("labels", {})
+                        gender = labels.get("gender", "").lower()
+                        accent = labels.get("accent", "")
+                        cat = v.get("category", "")
+                        if cat in ("professional", "high_quality", "cloned"):
+                            label = f"{name} (Female, {accent})" if gender == "female" else f"{name} (Male, {accent})"
+                            if gender == "female":
+                                api_female.append((vid, label))
+                            elif gender == "male":
+                                api_male.append((vid, label))
+                    random.shuffle(api_female)
+                    random.shuffle(api_male)
+                    logger.info(f"[{self.name}] API voices: {len(api_female)}F + {len(api_male)}M premium/cloned")
+        except Exception as e:
+            logger.debug(f"[{self.name}] API voice fetch skipped: {e}")
+
+        # ── Region-aware curated fallbacks (expanded) ──
         _country_lower = country.lower().strip()
         is_african = _country_lower in {
             "nigeria", "kenya", "tanzania", "south africa", "ghana",
             "cameroon", "senegal", "congo (drc)", "congo (republic)",
             "ethiopia", "mozambique", "rwanda", "uganda", "zambia",
-            "zimbabwe", "botswana", "somalia",
+            "zimbabwe", "botswana", "somalia", "malawi", "namibia",
+            "madagascar", "burkina faso", "mali", "niger", "chad",
+            "guinea", "benin", "togo", "sierra leone", "liberia",
         }
         is_south_asian = _country_lower in {
             "india", "bangladesh", "sri lanka", "nepal", "pakistan",
         }
         is_middle_east = _country_lower in {
             "saudi arabia", "uae", "qatar", "oman", "bahrain", "kuwait",
-            "egypt", "jordan", "iraq", "lebanon",
+            "egypt", "jordan", "iraq", "lebanon", "morocco", "tunisia",
+            "algeria", "libya",
+        }
+        is_latam = _country_lower in {
+            "brazil", "mexico", "colombia", "argentina", "chile", "peru",
+            "venezuela", "ecuador", "guatemala", "cuba", "bolivia",
+            "dominican republic", "honduras", "paraguay", "el salvador",
+            "nicaragua", "costa rica", "panama", "uruguay",
+        }
+        is_apac = _country_lower in {
+            "indonesia", "philippines", "malaysia", "thailand", "vietnam",
+            "myanmar", "cambodia", "singapore", "taiwan", "south korea",
+            "japan", "china", "mongolia", "laos",
         }
 
-        import random
-
-        # Prefer British/Neutral accented voices for South Asia + Africa (closer to local English)
-        # Prefer American/Neutral for Western markets
         if is_south_asian:
             female_voices = [
                 ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
                 ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
                 ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female, British)"),
                 ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
+                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
+                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
             ]
             male_voices = [
                 ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
                 ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
+                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
+                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
             ]
         elif is_african:
             female_voices = [
@@ -1155,45 +1209,101 @@ class AudioProducerAgent(BaseAgent):
                 ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female, British)"),
                 ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
                 ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
+                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
+                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
             ]
             male_voices = [
                 ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
                 ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
-                ("nPczCjzI2devNBz1zQrb", "Brian (Male)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
+                ("nPczCjzI2devNBz1zQrb", "Brian (Male, American)"),
+                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
             ]
         elif is_middle_east:
             female_voices = [
                 ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
                 ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
                 ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
+                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
+                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
             ]
             male_voices = [
                 ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
+                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+            ]
+        elif is_latam:
+            female_voices = [
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
+                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female, American)"),
+                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
+                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
+            ]
+            male_voices = [
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
+                ("pNInz6obpgDQGcFmaJgB", "Adam (Male, American)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
+                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+            ]
+        elif is_apac:
+            female_voices = [
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
+                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
+                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
+            ]
+            male_voices = [
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
+                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
+                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
             ]
         else:
             female_voices = [
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female)"),
-                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female)"),
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female)"),
-                ("jsCqWAovK2LkecY7zXl4", "Freya (Female)"),
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female)"),
+                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
+                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female, American)"),
+                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
+                ("jsCqWAovK2LkecY7zXl4", "Freya (Female, American)"),
+                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
+                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
+                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
+                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
             ]
             male_voices = [
-                ("JBFqnCBsd6RMkjVDRZzb", "George (Male)"),
-                ("pNInz6obpgDQGcFmaJgB", "Adam (Male)"),
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male)"),
+                ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
+                ("pNInz6obpgDQGcFmaJgB", "Adam (Male, American)"),
+                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
+                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
+                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
             ]
 
-        # Shuffle for variety across sessions
+        # Shuffle curated lists for variety across sessions
         random.shuffle(female_voices)
         random.shuffle(male_voices)
+
+        # Merge sources: API premium voices first (most diverse), then curated fallbacks
+        all_female = api_female + female_voices
+        all_male = api_male + male_voices
+
+        # Prepend LLM alt candidates (highest priority after primary)
+        for alt_id, alt_name, g in alt_candidates:
+            if g == "female" or (not g and "female" in alt_name.lower()):
+                all_female.insert(0, (alt_id, alt_name))
+            else:
+                all_male.insert(0, (alt_id, alt_name))
 
         # Enforce 2 female + 1 male gender balance
         female_count = 1 if primary_gender == "female" else 0
@@ -1201,26 +1311,21 @@ class AudioProducerAgent(BaseAgent):
         need_female = 2 - female_count
         need_male = 1 - male_count
 
-        # Merge LLM alt candidates into the curated lists (prioritized first)
-        all_female = alt_candidates + female_voices
-        all_male = alt_candidates + male_voices
-
         for vid, lbl in all_female:
             if len(pool) >= 3 or need_female <= 0:
                 break
-            if vid not in seen_ids and ("male" not in lbl.lower() or "female" in lbl.lower()):
+            if vid not in seen_ids:
                 pool.append((vid, lbl))
                 seen_ids.add(vid)
                 need_female -= 1
         for vid, lbl in all_male:
             if len(pool) >= 3 or need_male <= 0:
                 break
-            if vid not in seen_ids and "male" in lbl.lower() and "female" not in lbl.lower():
+            if vid not in seen_ids:
                 pool.append((vid, lbl))
                 seen_ids.add(vid)
                 need_male -= 1
-        # Fill any remaining slots from either list
-        for vid, lbl in female_voices + male_voices:
+        for vid, lbl in all_female + all_male:
             if len(pool) >= 3:
                 break
             if vid not in seen_ids:

@@ -61,7 +61,24 @@ type Tab = "users" | "pipeline" | "agents";
 
 export default function AdminPage() {
     const router = useRouter();
+    const [authChecked, setAuthChecked] = useState(false);
     const [tab, setTab] = useState<Tab>("users");
+
+    // ── Auth Check ──
+    useEffect(() => {
+        fetch("/api/auth/me")
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.authenticated && data.role === "admin") {
+                    setAuthChecked(true);
+                } else if (data.authenticated) {
+                    router.push("/");
+                } else {
+                    router.push("/login");
+                }
+            })
+            .catch(() => router.push("/login"));
+    }, [router]);
 
     // ── User Management State ──
     const [users, setUsers] = useState<User[]>([]);
@@ -237,7 +254,7 @@ export default function AdminPage() {
         setConfigMsg("");
     };
 
-    if (loading && users.length === 0 && tab === "users") {
+    if (!authChecked || (loading && users.length === 0 && tab === "users")) {
         return (
             <div className="flex h-[50vh] items-center justify-center">
                 <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />

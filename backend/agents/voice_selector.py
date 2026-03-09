@@ -115,32 +115,45 @@ Output valid JSON:
     {
       "voice_id": "string",
       "name": "string",
-      "reason": "string - why this is a good alternative",
-      "preview_url": "string - URL to preview this voice (copy from the voice list)"
+      "gender": "string - male or female",
+      "accent": "string - accent of this voice (British, American, Neutral, etc.)",
+      "reason": "string - SPECIFIC reason: why this voice works for this market, language, and demographic. Include accent match, gender fit, pronunciation quality for the target language. Do NOT give generic reasons."
     }
   ],
-  "audio_production_notes": "string - tips for best results with this voice and these scripts"
-}\
+  "audio_production_notes": "string - specific tips for this market: pronunciation pitfalls, pacing for this language, emotional tone that resonates locally"
+}
+
+CRITICAL RULES FOR ALTERNATIVES:
+- Select alternatives that are DIFFERENT from the primary voice: different name, different accent, different character.
+- Do NOT always pick the same voices (Lily, Aria, Daniel, Eric). ElevenLabs has hundreds of voices -- explore the full list provided.
+- Prefer voices you have NOT used in recent sessions. If you see professional/high_quality/cloned voices in the list, prioritize those.
+- Each alternative MUST have a specific, market-relevant reason -- NOT generic "good quality" text.
+- One alternative MUST be male if the primary is female (and vice versa) for gender diversity.
+- For local languages, explain WHY this voice handles pronunciation well for the specific language.\
 """
 
 
 _CURATED_ELEVENLABS_VOICES: list[dict[str, Any]] = [
     # Female voices -- diverse accents for regional targeting
-    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Soft, warm, friendly female voice. Clear enunciation, natural for Western markets and general use.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "europe", "general"]},
-    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "description": "Calm, confident female voice ideal for narration and promotions.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "general"]},
-    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, engaging voice with neutral accent. Excellent multilingual capability -- adapts naturally to Indian English, African English, and local languages via multilingual_v2.", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["south_asia", "middle_east", "general"]},
-    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined British-accented voice. Sounds natural and trustworthy for East/Southern African markets (Kenya, Tanzania, Uganda, Zambia, South Africa). Good for Indian English as well.", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["east_africa", "southern_africa", "south_asia"]},
-    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive voice. Adapts well to different accents with multilingual_v2 -- suitable for Hindi, Swahili, Yoruba, and other languages.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["general", "south_asia", "west_africa"]},
-    {"voice_id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy", "description": "Clear, pleasant British-accented voice. Warm tone works well for African and South Asian markets where British English is the norm.", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["east_africa", "west_africa", "south_asia"]},
-    {"voice_id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice", "description": "Natural, approachable British voice. Works well with multilingual_v2 for local language accents -- Swahili, Hindi, Tamil, Bengali, Arabic.", "labels": {"accent": "British", "gender": "female", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "south_asia", "middle_east"]},
-    {"voice_id": "jsCqWAovK2LkecY7zXl4", "name": "Freya", "description": "Expressive, lively female voice with personality. Good for energetic promotional campaigns.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "europe"]},
+    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Soft, warm, friendly. Clear enunciation, natural for Western markets.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "europe", "general"]},
+    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "description": "Calm, confident. Ideal for narration and promotions.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "general"]},
+    {"voice_id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "description": "Warm, neutral accent. Adapts naturally to Indian English, African English, and local languages.", "labels": {"accent": "Neutral", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["south_asia", "middle_east", "general"]},
+    {"voice_id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "description": "Gentle, refined British accent. Natural for East/Southern African and South Asian markets.", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["east_africa", "southern_africa", "south_asia"]},
+    {"voice_id": "9BWtsMINqrJLrRacOk9x", "name": "Aria", "description": "Versatile, expressive. Adapts well to Hindi, Swahili, Yoruba via eleven_v3.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["general", "south_asia", "west_africa"]},
+    {"voice_id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy", "description": "Clear, pleasant British accent. Warm tone for African and South Asian markets.", "labels": {"accent": "British", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["east_africa", "west_africa", "south_asia"]},
+    {"voice_id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice", "description": "Natural, approachable British voice. Great for Swahili, Hindi, Tamil, Bengali, Arabic.", "labels": {"accent": "British", "gender": "female", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "south_asia", "middle_east"]},
+    {"voice_id": "jsCqWAovK2LkecY7zXl4", "name": "Freya", "description": "Expressive, lively with personality. Good for energetic promos.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "europe"]},
+    {"voice_id": "cgSgspJ2msm6clMCkdW9", "name": "Jessica", "description": "Smooth, professional female voice. Clear and engaging for business promos.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["americas", "latam", "general"]},
+    {"voice_id": "jBpfuIE2acCO8z3wKNLl", "name": "Gigi", "description": "Bright, youthful female voice. Cheerful tone for mobile/telecom promotions.", "labels": {"accent": "American", "gender": "female", "age": "young"}, "category": "premade", "best_for_regions": ["apac", "latam", "general"]},
     # Male voices -- diverse accents for regional targeting
-    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy British-accented male voice. Excellent for East/Southern African campaigns (Kenya, Tanzania) and South Asian markets (India, Bangladesh). Sounds authoritative yet approachable.", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "southern_africa", "south_asia"]},
-    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative British male voice. Professional narration quality. British accent matches naturally with African English and Indian English.", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "west_africa", "south_asia"]},
-    {"voice_id": "cjVigY5qzO86Huf0OWal", "name": "Eric", "description": "Friendly, approachable male voice with natural delivery. Works well for telecom promotions across emerging markets.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["general", "south_asia", "west_africa"]},
-    {"voice_id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "description": "Confident male voice with clear articulation. Works well with multilingual_v2 for Hindi, Swahili, Arabic, and other languages.", "labels": {"accent": "American", "gender": "male", "age": "young"}, "category": "premade", "best_for_regions": ["general", "middle_east"]},
-    {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "description": "Deep, clear male voice with strong authoritative presence.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["americas", "europe"]},
-    {"voice_id": "nPczCjzI2devNBz1zQrb", "name": "Brian", "description": "Deep, resonant male voice with warmth. Good for promotional content across markets.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["americas", "general"]},
+    {"voice_id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "description": "Smooth, trustworthy British accent. Excellent for East/Southern African and South Asian campaigns.", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "southern_africa", "south_asia"]},
+    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "description": "Warm, authoritative British male. Professional narration quality for African and Indian English.", "labels": {"accent": "British", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["east_africa", "west_africa", "south_asia"]},
+    {"voice_id": "cjVigY5qzO86Huf0OWal", "name": "Eric", "description": "Friendly, approachable. Natural delivery for telecom promotions across emerging markets.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["general", "south_asia", "west_africa"]},
+    {"voice_id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "description": "Confident, clear articulation. Works well for Hindi, Swahili, Arabic, Portuguese, Spanish.", "labels": {"accent": "American", "gender": "male", "age": "young"}, "category": "premade", "best_for_regions": ["general", "middle_east", "latam"]},
+    {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "description": "Deep, clear, authoritative presence. Professional telecom voice.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["americas", "europe"]},
+    {"voice_id": "nPczCjzI2devNBz1zQrb", "name": "Brian", "description": "Deep, resonant warmth. Good for promotional content across markets.", "labels": {"accent": "American", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["americas", "general"]},
+    {"voice_id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum", "description": "Transatlantic accent, calm and authoritative. Versatile across regions.", "labels": {"accent": "Transatlantic", "gender": "male", "age": "middle-aged"}, "category": "premade", "best_for_regions": ["general", "apac", "middle_east"]},
+    {"voice_id": "IKne3meq5aSn9XLyUdCD", "name": "Charlie", "description": "Australian-accented male. Relaxed, trustworthy tone for APAC markets.", "labels": {"accent": "Australian", "gender": "male", "age": "young"}, "category": "premade", "best_for_regions": ["apac", "general"]},
 ]
 
 

@@ -107,13 +107,31 @@ function HomePageContent() {
     }
   }, [searchParams]);
 
-  // Wizard
-  const [wizardStep, setWizardStep] = useState<WizardStep>("input");
+  // Wizard -- restore from sessionStorage if user navigated away mid-session
+  const [wizardStep, setWizardStep] = useState<WizardStep>(() => {
+    if (typeof window === "undefined") return "input";
+    const saved = sessionStorage.getItem("obd_wizard_step");
+    return (saved as WizardStep) || "input";
+  });
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>(
     PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
   );
-  const [result, setResult] = useState<PipelineResult | null>(null);
+  const [result, setResult] = useState<PipelineResult | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = sessionStorage.getItem("obd_result");
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
   const [error, setError] = useState("");
+
+  // Persist result + wizard step to sessionStorage so navigation doesn't lose them
+  useEffect(() => {
+    if (result) {
+      sessionStorage.setItem("obd_result", JSON.stringify(result));
+    }
+    sessionStorage.setItem("obd_wizard_step", wizardStep);
+  }, [result, wizardStep]);
 
   // Save
   const [campaignName, setCampaignName] = useState("");
@@ -168,31 +186,39 @@ function HomePageContent() {
         }
       })
       .catch(() => {
-        setAuthChecked(true);
+        router.push("/login");
       });
   }, [router]);
 
   // ── Cache check (debounced) ──
   useEffect(() => {
     if (cacheCheckTimer.current) clearTimeout(cacheCheckTimer.current);
-    setCacheStatus(null);
     setForceReanalyze(false);
 
-    if (!productText.trim() || !country || !telco) return;
+    // Need at least country + telco for a partial match check
+    if (!country || !telco) {
+      setCacheStatus(null);
+      return;
+    }
 
     cacheCheckTimer.current = setTimeout(async () => {
       try {
         const res = await fetch("/api/cache/check", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ product_text: productText, country, telco, language: language || undefined }),
+          body: JSON.stringify({
+            product_text: productText || "",
+            country,
+            telco,
+            language: language || undefined,
+          }),
         });
         if (res.ok) {
           const data = await res.json();
           setCacheStatus(data);
         }
       } catch { /* silent */ }
-    }, 150);
+    }, 80);
 
     return () => { if (cacheCheckTimer.current) clearTimeout(cacheCheckTimer.current); };
   }, [productText, country, telco, language]);
@@ -722,6 +748,10 @@ function HomePageContent() {
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
     if (wsRef.current) wsRef.current.close();
+
+    // Clear persisted session
+    sessionStorage.removeItem("obd_result");
+    sessionStorage.removeItem("obd_wizard_step");
   };
 
   // Wait for auth

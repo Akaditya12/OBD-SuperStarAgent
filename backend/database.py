@@ -378,39 +378,39 @@ def check_cache_exists(product_text: str, country: str, telco: str, language: st
     if not supabase:
         return result
 
-    cache_key = _analysis_cache_key(product_text, country, telco, language)
-
-    # Exact match: same product + country + telco
-    try:
-        resp = (
-            supabase.table("analysis_cache")
-            .select("cache_key")
-            .eq("cache_key", cache_key)
-            .limit(1)
-            .execute()
-        )
-        if resp.data and len(resp.data) > 0:
-            result["exact"] = True
-            result["exact_cached_at"] = resp.data[0].get("cached_at", "")
-    except Exception as e:
-        logger.warning("Exact cache check failed: %s", e)
-
-    # Partial match: same country + telco, any product
-    if not result["exact"]:
+    # Exact match only possible when product_text is provided
+    if product_text:
+        cache_key = _analysis_cache_key(product_text, country, telco, language)
         try:
             resp = (
                 supabase.table("analysis_cache")
-                .select("cache_key, country, telco")
-                .eq("country", country)
-                .eq("telco", telco)
+                .select("cache_key")
+                .eq("cache_key", cache_key)
                 .limit(1)
                 .execute()
             )
-            if resp.data and len(resp.data) > 0:
-                result["partial"] = True
-                result["partial_cached_at"] = resp.data[0].get("cached_at", "")
+            if resp and resp.data and len(resp.data) > 0:
+                result["exact"] = True
+                result["exact_cached_at"] = resp.data[0].get("cached_at", "")
+                return result
         except Exception as e:
-            logger.warning("Partial cache check failed: %s", e)
+            logger.warning("Exact cache check failed: %s", e)
+
+    # Partial match: same country + telco, any product
+    try:
+        resp = (
+            supabase.table("analysis_cache")
+            .select("cache_key, country, telco")
+            .eq("country", country)
+            .eq("telco", telco)
+            .limit(1)
+            .execute()
+        )
+        if resp and resp.data and len(resp.data) > 0:
+            result["partial"] = True
+            result["partial_cached_at"] = resp.data[0].get("cached_at", "")
+    except Exception as e:
+        logger.warning("Partial cache check failed: %s", e)
 
     return result
 
