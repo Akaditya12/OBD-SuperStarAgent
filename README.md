@@ -1,144 +1,171 @@
 # OBD SuperStar Agent
 
-AI-powered multi-agent system that generates culturally-relevant OBD (Outbound Dialer) promotional scripts and audio recordings. Upload your product documentation, select a target country and telco, and the system produces ready-to-deploy OBD audio files.
+AI-powered multi-agent system that generates culturally relevant **OBD (Outbound Dialer)** promotional scripts and broadcast-quality audio. Upload product documentation, select country/telco/language, and run the pipeline—or use **Script to Voice** to turn any pasted script into audio with region-aware voices.
+
+**Branding:** blackNgreen · Touching Billions of Lives
+
+---
+
+## Current status (develop)
+
+| Area | Status |
+|------|--------|
+| **Main OBD pipeline** | 6 agents orchestrated via WebSocket; cache-aware skip/rerun; session persistence (sessionStorage) |
+| **Script to Voice** | Paste script → 3 voice previews (or 1 if voice locked) → final audio with BGM; **lock voice** for next scripts |
+| **TTS** | **Auto** prefers **ElevenLabs** (`eleven_v3`) → Murf → edge-tts; region-based voice pools + accent priming for African/APAC/LATAM/ME |
+| **Persistence** | **Supabase** when `SUPABASE_URL` + key set; else **SQLite** (`backend/campaigns.db`) |
+| **Auth** | JWT via Supabase; login required when configured; sidebar hidden on login |
+| **Themes** | Multiple themes; default **Light** |
+
+---
+
+## Features
+
+### Main campaign flow
+
+- **Product Analyzer** — Structured brief from product docs  
+- **Market Researcher** — Country/telco/culture analysis  
+- **Script Writer** — Multiple variants (hook/body/CTA/fallbacks); language override with **transliterated local language** (Latin script) when chosen  
+- **Eval Panel** — Multi-persona scoring and feedback  
+- **Script revision** — Optional loop based on eval  
+- **Voice Selector** — LLM picks market-appropriate voice + alternatives  
+- **Audio Producer** — TTS + BGM mix; hook previews (2F+1M balance for ElevenLabs pool)  
+- **Smart pipeline** — Cache banner; skip/rerun steps when reusing saved analysis  
+- **Voice Analytics** — Rationale, engine, accent tags per voice  
+
+### Script to Voice (`/script-to-voice`)
+
+- Paste or upload `.txt`; pick **country** (drives accent/voice pool), language, TTS engine (Auto / ElevenLabs / Murf / edge-tts)  
+- **Speech speed** slider (e.g. 0.7x–1.3x) for ElevenLabs v3  
+- **Full script** sent to TTS (no truncation)  
+- **Use Same Voice for Next Script** — locks `voice_id` + label; next run uses one preview only, then generate  
+- **Unlock** — back to 3-voice audition  
+- Save to dashboard as campaign type `script_to_voice`  
+
+### Dashboard & translation
+
+- Dashboard lists campaigns; expand to play/download  
+- **Translate to English** for transliterated scripts (translator prompt handles transliterated input)  
+
+---
 
 ## Architecture
 
 ```
-Product Doc + Country + Telco
+Product Doc + Country + Telco (+ Language)
         |
         v
-[Agent 1: Product Analyzer]    -- Extracts structured product brief
+[1 Product Analyzer]  → structured brief
+[2 Market Researcher] → market analysis
+[3 Script Writer]     → variants (+ optional revision)
+[4 Eval Panel]        → scores & feedback
+[5 Voice Selector]    → primary + alternative voices
+[6 Audio Producer]    → TTS (ElevenLabs / Murf / edge-tts) + BGM
         |
         v
-[Agent 2: Market Researcher]   -- Country/culture/audience analysis
-        |
-        v
-[Agent 3: Script Writer]       -- Hook + Body + CTA + Fallbacks (x5 variants)
-        |
-        v
-[Agent 4: Eval Panel]          -- 10 AI evaluator personas score & critique
-        |
-        v (feedback loop)
-[Agent 3: Script Writer]       -- Revised scripts based on feedback
-        |
-        v
-[Agent 5: Voice Selector]      -- Picks optimal voice for market
-        |
-        v
-[Agent 6: Audio Producer]      -- TTS: Murf AI → ElevenLabs → edge-tts (free)
-        |
-        v
-    Final Audio Files (downloadable)
+Final scripts + audio (download / save to dashboard)
 ```
 
-## Tech Stack
+**Script to Voice** reuses Agent 6 only: same TTS stack, country-aware pools, optional locked voice.
 
-- **Backend**: Python FastAPI with WebSocket support
-- **Frontend**: Next.js 15 + React 19 + Tailwind CSS
-- **LLM**: Azure OpenAI (GPT-5.1-chat)
-- **TTS**: Murf AI (primary), ElevenLabs or edge-tts (free) as fallbacks. Language override supported for scripts.
+---
 
-## Quick Start
+## Tech stack
 
-### 1. Clone and configure
+| Layer | Stack |
+|-------|--------|
+| Backend | Python **FastAPI**, WebSockets, async TTS |
+| Frontend | **Next.js 15**, React 19, Tailwind |
+| LLM | **Azure OpenAI** (agents + translation) |
+| TTS | **ElevenLabs** (`eleven_v3`), **Murf AI**, **edge-tts** |
+| DB | **Supabase** (PostgreSQL) + optional SQLite fallback |
+| Storage | Supabase Storage for audio when configured |
+| Deploy | Docker + Render (`render.yaml`, `Dockerfile`) |
+
+---
+
+## Quick start
 
 ```bash
 cd OBD_SuperStarAgent
-cp .env.example .env
-# Edit .env with your API keys
+cp .env.example .env   # edit with keys
 ```
 
-### 2. Backend setup
+**Backend**
 
 ```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+python3 -m venv venv && source venv/bin/activate
 pip install -r backend/requirements.txt
-
-# Start the backend
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 3. Frontend setup
+**Frontend**
 
 ```bash
-cd frontend
-npm install
-npm run dev
+cd frontend && npm install && npm run dev
 ```
 
-### 4. Open the app
+Open **http://localhost:3000**
 
-Visit [http://localhost:3000](http://localhost:3000) in your browser.
+---
 
-## API Keys Required
+## Verify services (no start)
 
-| Key | Required | Purpose |
-|-----|----------|---------|
-| `AZURE_OPENAI_API_KEY` | Yes | Azure OpenAI for all LLM agents |
-| `AZURE_OPENAI_ENDPOINT` | Yes | Your Azure OpenAI resource URL |
-| `AZURE_OPENAI_DEPLOYMENT` | Yes | Deployment name (e.g. `gpt-5.1-chat`) |
-| `AZURE_OPENAI_API_VERSION` | Yes | API version (e.g. `2025-01-01-preview`) |
-| `MURF_API_KEY` | Optional | Primary TTS (Murf AI). Sign up at [murf.ai](https://murf.ai) |
-| `ELEVENLABS_API_KEY` | Optional | Fallback TTS. If neither Murf nor ElevenLabs is set, edge-tts (free) is used |
-| `LOGIN_USERNAME` / `LOGIN_PASSWORD` | Optional | If both set, login is required (e.g. on Render) |
+```bash
+lsof -i :8000
+lsof -i :3000
+nc -z 127.0.0.1 8000 && echo backend up
+nc -z 127.0.0.1 3000 && echo frontend up
+curl -s -o /dev/null -w "backend %{http_code}\n" http://127.0.0.1:8000/docs
+curl -s -o /dev/null -w "frontend %{http_code}\n" http://127.0.0.1:3000/
+```
 
-## API Endpoints
+---
+
+## API keys & env
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `AZURE_OPENAI_*` | Yes | All LLM agents + translation |
+| `ELEVENLABS_API_KEY` | Recommended | Primary TTS in Auto; best multilingual |
+| `MURF_API_KEY` | Optional | Murf TTS |
+| Supabase URL + service key | Optional | Campaigns + auth + storage |
+| `LOGIN_USERNAME` / `LOGIN_PASSWORD` | Optional | Legacy simple auth if no Supabase |
+
+Full list: `.env.example`
+
+---
+
+## API endpoints (selected)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/health` | Health check |
-| `POST` | `/api/generate` | Start pipeline (sync) |
-| `WS` | `/ws/generate` | Start pipeline (WebSocket with live progress) |
-| `GET` | `/api/sessions/{id}` | Get session results |
-| `GET` | `/api/sessions/{id}/scripts` | Download scripts (JSON or text format) |
-| `GET` | `/api/sessions/{id}/audio` | List audio files |
-| `GET` | `/api/audio/{id}/{file}` | Download audio file |
+| `GET` | `/api/auth/me` | Current user |
+| `WS` | `/ws/generate` | Pipeline with live progress |
+| `POST` | `/api/script-to-voice/preview` | Start preview job (optional `locked_voice_id`) |
+| `GET` | `/api/script-to-voice/jobs/{job_id}` | Poll job status |
+| `POST` | `/api/script-to-voice/generate` | Final audio (optional `locked_voice_id`) |
+| `POST` | `/api/script-to-voice/save` | Save as dashboard campaign |
+| `POST` | `/api/script-to-voice/upload-bgm` | Custom BGM file |
 
-## How It Works
+---
 
-1. **Product Analyzer**: Parses your product documentation into a structured brief with features, pricing, USPs, and subscription mechanisms.
+## Sample products
 
-2. **Market Researcher**: Analyzes the target country and telco -- demographics, cultural nuances, current affairs, consumer psychology, and promotion recommendations.
+`sample_products/` — e.g. `eva_ai_on_call.txt` for EVA AI On Call demos.
 
-3. **Script Writer**: Creates 5 unique script variants, each with:
-   - **Hook** (5s): Attention-grabbing opener using cultural references
-   - **Body** (18s): Compelling product pitch focused on benefits
-   - **CTA** (7s): Clear DTMF-based call to action
-   - **Fallback 1**: Urgency-based follow-up if no response
-   - **Fallback 2**: Psychological persuasion techniques
-   - **Polite Closure**: Graceful exit
+---
 
-4. **Eval Panel**: 10 AI evaluator personas (psychologist, copywriters, cultural consultant, etc.) score and critique each script.
+## Deploy
 
-5. **Script Revision**: Scripts are revised based on panel feedback.
+- **Render**: Blueprint / Dockerfile; set env in dashboard; health `/api/health`  
+- Ephemeral disk on free tier — use Supabase for durable campaigns/audio  
 
-6. **Voice Selector**: Picks the best voice for the target market (Murf, ElevenLabs, or edge-tts).
+See **`PROJECT.md`** for continuity, extending agents, and where data lives.
 
-7. **Audio Producer**: Generates MP3 files via Murf AI (or ElevenLabs/edge-tts). Script tags like `[excited]` are stripped before TTS; BGM is mixed at low volume.
+---
 
-## Sample Products
+## Repo
 
-The `sample_products/` directory contains product descriptions ready for use:
-
-- **`eva_ai_on_call.txt`** -- EVA AI Personal Assistant (AI On Call) -- an AI-powered IVR/personal call assistant VAS product
-
-To use: Upload the product file in the UI, select your target country and telco, and run the pipeline.
-
-## Dashboard & persistence
-
-- **Dashboard** (`/dashboard`): Lists saved campaigns (name, country, telco, language, script/audio counts). Expand a campaign to see script variants and play/download audio.
-- **Saving**: Click "Save to dashboard" on the results page to store the campaign in the local SQLite DB (`backend/campaigns.db`). Comments and collaboration use the same DB.
-- **On Render**: The filesystem is ephemeral — `campaigns.db` and `outputs/` are wiped on each deploy. Use Render for demos; for long-term storage consider a hosted DB and object store (see `PROJECT.md`).
-
-## Deploy to Render
-
-1. Connect the GitHub repo at [dashboard.render.com](https://dashboard.render.com) (Blueprint or Web Service).
-2. Set environment variables in the Render dashboard (see table above); do not commit `.env`.
-3. Deploy uses the repo’s `Dockerfile` and `render-start.sh`. Health check: `/api/health`.
-
-See **`PROJECT.md`** for continuity (running without Cursor, where progress is saved, how to extend the project).
+**GitHub:** `Akaditya12/OBD-SuperStarAgent` — default branch workflow; `develop` used for active integration.
