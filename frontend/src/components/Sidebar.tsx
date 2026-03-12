@@ -56,6 +56,7 @@ const BNG_PRODUCT_LIST = [
 export default function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
+    const [mounted, setMounted] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
@@ -63,6 +64,10 @@ export default function Sidebar() {
 
     const isOnProductPage = pathname.startsWith("/product/");
     const [productsOpen, setProductsOpen] = useState(isOnProductPage);
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     useEffect(() => {
         if (pathname.startsWith("/product/")) setProductsOpen(true);
@@ -97,6 +102,9 @@ export default function Sidebar() {
         } catch { /* best-effort */ }
         router.push("/login");
     };
+
+    // Avoid SSR/client route mismatch hydration issues, especially on ngrok.
+    if (!mounted) return null;
 
     if (pathname === "/login") return null;
 

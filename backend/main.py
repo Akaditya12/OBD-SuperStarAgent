@@ -1732,6 +1732,9 @@ async def stv_preview(request: Request):
     country = body.get("country", "")
     language = body.get("language") or None
     tts_engine = body.get("tts_engine") or None
+    speed = body.get("speed", 1.0)
+    locked_voice_id = body.get("locked_voice_id") or ""
+    locked_voice_label = body.get("locked_voice_label") or ""
 
     session_id = uuid.uuid4().hex[:8]
     job_id = uuid.uuid4().hex[:12]
@@ -1742,16 +1745,18 @@ async def stv_preview(request: Request):
         "scripts": [{
             "variant_id": 1,
             "theme": "Script to Voice",
-            "hook": script_text[:300],
+            "hook": script_text,
             "full_script": script_text,
             "language": language or "English",
         }],
     }
 
     voice_selection: dict[str, Any] = {
-        "selected_voice": {"voice_id": "", "name": "auto"},
-        "voice_settings": {},
+        "selected_voice": {"voice_id": locked_voice_id, "name": locked_voice_label or "auto"},
+        "voice_settings": {"speed": speed},
     }
+
+    num_voices = 1 if locked_voice_id else None
 
     async def _run():
         from backend.agents import AudioProducerAgent
@@ -1764,6 +1769,7 @@ async def stv_preview(request: Request):
                 country=country,
                 language=language,
                 tts_engine_override=tts_engine,
+                num_voices=num_voices,
             )
             sessions[session_id] = {
                 "session_id": session_id,
@@ -1827,6 +1833,7 @@ async def stv_generate(request: Request):
     language = body.get("language") or None
     tts_engine = body.get("tts_engine") or None
     bgm_id = body.get("bgm_id") or None
+    speed = body.get("speed", 1.0)
 
     if not script_text:
         return JSONResponse(status_code=400, content={"error": "script_text is required"})
@@ -1834,11 +1841,14 @@ async def stv_generate(request: Request):
     if not session_id:
         session_id = uuid.uuid4().hex[:8]
 
+    locked_voice_id = body.get("locked_voice_id") or ""
+    locked_voice_label = body.get("locked_voice_label") or ""
+
     full_scripts: dict[str, Any] = {
         "scripts": [{
             "variant_id": 1,
             "theme": "Script to Voice",
-            "hook": script_text[:300],
+            "hook": script_text,
             "full_script": script_text,
         }],
     }
@@ -1846,8 +1856,15 @@ async def stv_generate(request: Request):
     existing = sessions.get(session_id) or {}
     voice_selection = existing.get("voice_selection") or {
         "selected_voice": {"voice_id": "", "name": "auto"},
-        "voice_settings": {},
+        "voice_settings": {"speed": speed},
     }
+    if locked_voice_id:
+        voice_selection["selected_voice"] = {
+            "voice_id": locked_voice_id,
+            "name": locked_voice_label or "Locked Voice",
+        }
+    if speed != 1.0:
+        voice_selection.setdefault("voice_settings", {})["speed"] = speed
 
     # Retrieve the engine_ctx from the preview phase so the same voice pool is used
     stored_engine_ctx = None

@@ -18,6 +18,8 @@ import {
   AlertCircle,
   Save,
   Check,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
 import { forceDownload } from "@/lib/utils";
@@ -72,6 +74,7 @@ export default function ScriptToVoicePage() {
   const [ttsEngine, setTtsEngine] = useState("auto");
   const [bgmStyle, setBgmStyle] = useState("upbeat");
   const [audioFormat, setAudioFormat] = useState<"mp3" | "wav">("mp3");
+  const [speed, setSpeed] = useState(1.0);
   const [bgmId, setBgmId] = useState<string | null>(null);
   const [bgmFileName, setBgmFileName] = useState<string>("");
   const [uploadingBgm, setUploadingBgm] = useState(false);
@@ -92,6 +95,13 @@ export default function ScriptToVoicePage() {
     public_url?: string;
     voice_name: string;
     duration?: number;
+  } | null>(null);
+
+  // Locked voice (reuse across scripts)
+  const [lockedVoice, setLockedVoice] = useState<{
+    voice_id: string;
+    label: string;
+    engine: string;
   } | null>(null);
 
   // Save state
@@ -179,15 +189,22 @@ export default function ScriptToVoicePage() {
     setPreviews([]);
 
     try {
+      const reqBody: Record<string, unknown> = {
+        script_text: scriptText,
+        country,
+        language: language || undefined,
+        tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
+        speed,
+      };
+      if (lockedVoice) {
+        reqBody.locked_voice_id = lockedVoice.voice_id;
+        reqBody.locked_voice_label = lockedVoice.label;
+      }
+
       const res = await fetch("/api/script-to-voice/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          script_text: scriptText,
-          country,
-          language: language || undefined,
-          tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
-        }),
+        body: JSON.stringify(reqBody),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -224,20 +241,26 @@ export default function ScriptToVoicePage() {
     setFinalAudio(null);
 
     try {
+      const genBody: Record<string, unknown> = {
+        session_id: sessionId,
+        script_text: scriptText,
+        voice_choice: selectedVoice,
+        country,
+        language: language || undefined,
+        bgm_style: bgmStyle,
+        audio_format: audioFormat,
+        tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
+        bgm_id: bgmStyle === "custom" ? bgmId : undefined,
+        speed,
+      };
+      if (lockedVoice) {
+        genBody.locked_voice_id = lockedVoice.voice_id;
+        genBody.locked_voice_label = lockedVoice.label;
+      }
       const res = await fetch("/api/script-to-voice/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          script_text: scriptText,
-          voice_choice: selectedVoice,
-          country,
-          language: language || undefined,
-          bgm_style: bgmStyle,
-          audio_format: audioFormat,
-          tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
-          bgm_id: bgmStyle === "custom" ? bgmId : undefined,
-        }),
+        body: JSON.stringify(genBody),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -298,6 +321,7 @@ export default function ScriptToVoicePage() {
 
   const reset = () => {
     setStep("input");
+    setScriptText("");
     setPreviews([]);
     setFinalAudio(null);
     setSelectedVoice(0);
@@ -310,6 +334,7 @@ export default function ScriptToVoicePage() {
     setSaved(false);
     setBgmId(null);
     setBgmFileName("");
+    setLockedVoice(null);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setPlayingId(null);
   };
@@ -490,6 +515,33 @@ export default function ScriptToVoicePage() {
                   ))}
                 </div>
               </div>
+
+              {/* Speed Control */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-[var(--text-secondary)] flex items-center justify-between">
+                  <span>Speech Speed ({speed.toFixed(2)}x)</span>
+                  <button
+                    onClick={() => setSpeed(1.0)}
+                    className="text-[10px] text-[var(--accent)] hover:underline"
+                  >
+                    Reset
+                  </button>
+                </label>
+                <input
+                  type="range"
+                  min={0.7}
+                  max={1.3}
+                  step={0.05}
+                  value={speed}
+                  onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                  className="w-full accent-[var(--accent)]"
+                />
+                <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
+                  <span>Slower (0.7x)</span>
+                  <span>Normal (1.0x)</span>
+                  <span>Faster (1.3x)</span>
+                </div>
+              </div>
             </div>
 
             {/* Error */}
@@ -500,7 +552,29 @@ export default function ScriptToVoicePage() {
               </div>
             )}
 
-            {/* Generate Previews Button */}
+            {/* Locked voice indicator */}
+            {lockedVoice && (
+              <div className="flex items-center justify-between p-4 rounded-2xl bg-[var(--accent-subtle)] border border-[var(--accent)]/30">
+                <div className="flex items-center gap-3">
+                  <Lock className="w-4 h-4 text-[var(--accent)]" />
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">Voice Locked: {lockedVoice.label}</p>
+                    <p className="text-[10px] text-[var(--text-tertiary)]">
+                      Same voice will be used for this script &middot; {lockedVoice.engine === "elevenlabs" ? "ElevenLabs" : lockedVoice.engine === "murf" ? "Murf AI" : lockedVoice.engine || "Auto"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setLockedVoice(null)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-[var(--text-secondary)] border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-all"
+                >
+                  <Unlock className="w-3 h-3" />
+                  Unlock
+                </button>
+              </div>
+            )}
+
+            {/* Generate Button */}
             <button
               onClick={handlePreview}
               disabled={!scriptText.trim() || previewing}
@@ -510,12 +584,21 @@ export default function ScriptToVoicePage() {
               {previewing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Generating 3 voice options...
+                  {lockedVoice ? "Generating with locked voice..." : "Generating 3 voice options..."}
                 </>
               ) : (
                 <>
-                  Generate Voice Previews
-                  <ArrowRight className="w-4 h-4" />
+                  {lockedVoice ? (
+                    <>
+                      <Lock className="w-4 h-4" />
+                      Generate with {lockedVoice.label}
+                    </>
+                  ) : (
+                    <>
+                      Generate Voice Previews
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </>
               )}
             </button>
@@ -741,14 +824,42 @@ export default function ScriptToVoicePage() {
               )}
             </div>
 
-            {/* Start over */}
-            <button
-              onClick={reset}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card-hover)] transition-all"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Create Another
-            </button>
+            {/* Next actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  const chosenPreview = previews[selectedVoice];
+                  const vid = chosenPreview?.voice_id || "";
+                  const vlabel = chosenPreview?.voice_label || chosenPreview?.voice_name || finalAudio.voice_name || "Voice";
+                  setLockedVoice({ voice_id: vid, label: vlabel, engine: activeTtsEngine });
+                  setStep("input");
+                  setScriptText("");
+                  setPreviews([]);
+                  setFinalAudio(null);
+                  setSelectedVoice(0);
+                  setSessionId("");
+                  setPreviewError("");
+                  setGenerateError("");
+                  setSaveName("");
+                  setSaving(false);
+                  setSaved(false);
+                  if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+                  setPlayingId(null);
+                }}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold text-white bg-[var(--accent)] hover:brightness-110 transition-all shadow-lg"
+                style={{ boxShadow: "0 4px 20px var(--accent-glow)" }}
+              >
+                <Lock className="w-4 h-4" />
+                Use Same Voice for Next Script
+              </button>
+              <button
+                onClick={reset}
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card-hover)] transition-all"
+              >
+                <RefreshCw className="w-4 h-4" />
+                New Voice
+              </button>
+            </div>
           </div>
         )}
 

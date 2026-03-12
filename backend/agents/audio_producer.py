@@ -462,6 +462,83 @@ def _get_murf_voice_pool(country: str, language: str | None) -> list[tuple[str, 
     return MURF_VOICE_POOL["english"]
 
 
+def _country_to_elevenlabs_lang_code(country: str, language: str | None) -> str | None:
+    """Map country/language to ElevenLabs eleven_v3 language_code (BCP-47).
+
+    Returns None if no specific mapping is needed (defaults to model auto-detect).
+    """
+    c = country.lower().strip()
+
+    if language:
+        lang_lower = language.lower().strip()
+        lang_map = {
+            "english": "en", "french": "fr", "spanish": "es",
+            "portuguese": "pt", "arabic": "ar", "swahili": "sw",
+            "hindi": "hi", "amharic": "am", "setswana": "tn",
+            "zulu": "zu", "yoruba": "yo", "hausa": "ha",
+            "igbo": "ig", "shona": "sn", "afrikaans": "af",
+            "malay": "ms", "indonesian": "id", "tagalog": "tl",
+            "thai": "th", "vietnamese": "vi", "turkish": "tr",
+            "urdu": "ur", "bengali": "bn", "tamil": "ta",
+            "telugu": "te", "chinese": "zh", "japanese": "ja",
+            "korean": "ko", "german": "de", "italian": "it",
+            "russian": "ru", "polish": "pl", "dutch": "nl",
+        }
+        for key, code in lang_map.items():
+            if key in lang_lower:
+                return code
+
+    country_map = {
+        "zambia": "en", "botswana": "en", "kenya": "en", "nigeria": "en",
+        "ghana": "en", "south africa": "en", "tanzania": "sw",
+        "ethiopia": "am", "cameroon": "fr", "senegal": "fr",
+        "congo (drc)": "fr", "mozambique": "pt", "rwanda": "fr",
+        "uganda": "en", "zimbabwe": "en", "malawi": "en",
+        "namibia": "en", "madagascar": "fr",
+        "india": "hi", "bangladesh": "bn", "sri lanka": "en",
+        "nepal": "hi", "pakistan": "ur",
+        "saudi arabia": "ar", "uae": "ar", "qatar": "ar",
+        "oman": "ar", "bahrain": "ar", "kuwait": "ar",
+        "egypt": "ar", "jordan": "ar", "iraq": "ar",
+        "lebanon": "ar", "morocco": "ar", "tunisia": "ar",
+        "brazil": "pt", "mexico": "es", "colombia": "es",
+        "argentina": "es", "chile": "es", "peru": "es",
+        "indonesia": "id", "philippines": "tl", "malaysia": "ms",
+        "thailand": "th", "vietnam": "vi", "singapore": "en",
+        "south korea": "ko", "japan": "ja", "china": "zh",
+    }
+    return country_map.get(c)
+
+
+def _get_accent_description(country: str) -> str:
+    """Return a short accent description for the country to guide eleven_v3.
+
+    ElevenLabs eleven_v3 can modulate accent when given regional text cues.
+    Returns empty string for default/western markets.
+    """
+    c = country.lower().strip()
+    _african = {
+        "zambia", "botswana", "kenya", "nigeria", "ghana", "south africa",
+        "tanzania", "uganda", "zimbabwe", "ethiopia", "malawi", "namibia",
+        "cameroon", "senegal", "rwanda", "mozambique", "madagascar",
+        "sierra leone", "liberia", "congo (drc)",
+    }
+    if c in _african:
+        return "African"
+    if c in {"india", "bangladesh", "sri lanka", "nepal", "pakistan"}:
+        return "South Asian"
+    if c in {"saudi arabia", "uae", "qatar", "oman", "bahrain", "kuwait",
+             "egypt", "jordan", "iraq", "lebanon", "morocco", "tunisia"}:
+        return "Middle Eastern"
+    if c in {"brazil", "mexico", "colombia", "argentina", "chile", "peru",
+             "venezuela", "ecuador"}:
+        return "Latin American"
+    if c in {"indonesia", "philippines", "malaysia", "thailand", "vietnam",
+             "singapore", "cambodia", "myanmar"}:
+        return "Southeast Asian"
+    return ""
+
+
 def _pick_edge_voice(country: str, language: str | None) -> str:
     """Pick the best edge-tts voice for the given country and language."""
     if language:
@@ -973,6 +1050,8 @@ class AudioProducerAgent(BaseAgent):
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
         custom_bgm_path: Path | None = None,
+        language_code: str | None = None,
+        accent_desc: str = "",
     ) -> dict[str, Any]:
         effective_model = model_id or ELEVENLABS_TTS_MODEL
         url = f"{ELEVENLABS_BASE_URL}/v1/text-to-speech/{voice_id}"
@@ -981,11 +1060,10 @@ class AudioProducerAgent(BaseAgent):
         from backend.config import get_live_config
         live = get_live_config()
 
-        # eleven_v3 needs higher stability for clear local language pronunciation
         is_v3 = "v3" in effective_model
-        default_stability = 0.50 if is_v3 else 0.35
-        default_similarity = 0.80
-        default_style = 0.35 if is_v3 else 0.45
+        default_stability = 0.65 if is_v3 else 0.35
+        default_similarity = 0.85
+        default_style = 0.25 if is_v3 else 0.45
 
         vs: dict[str, Any] = {
             "stability": voice_settings.get("stability", live.get("voice_stability", default_stability)),
@@ -1000,10 +1078,15 @@ class AudioProducerAgent(BaseAgent):
             "voice_settings": vs,
         }
 
-        # eleven_v3 supports speed parameter for perfect OBD pacing
         if is_v3:
             speed = voice_settings.get("speed", live.get("voice_speed", 1.0))
             payload["speed"] = speed
+            if language_code:
+                payload["language_code"] = language_code
+            if accent_desc:
+                payload["previous_text"] = (
+                    f"Speaking with a warm, natural {accent_desc} accent and clear enunciation. "
+                )
 
         headers = {
             "xi-api-key": ELEVENLABS_API_KEY,
@@ -1025,6 +1108,8 @@ class AudioProducerAgent(BaseAgent):
                 )
                 payload["model_id"] = "eleven_multilingual_v2"
                 payload.pop("speed", None)
+                payload.pop("language_code", None)
+                payload.pop("previous_text", None)
                 response = await client.post(
                     url, json=payload, headers=headers, params=params, timeout=30.0,
                 )
@@ -1093,12 +1178,35 @@ class AudioProducerAgent(BaseAgent):
         fallback_gender = ""
         if not primary_voice_id or not primary_voice_id.strip():
             from backend.agents.voice_selector import _CURATED_ELEVENLABS_VOICES
-            if _CURATED_ELEVENLABS_VOICES:
+            _country_tag = country.lower().strip()
+            _region_tags: set[str] = set()
+            if _country_tag in {"nigeria", "kenya", "tanzania", "south africa", "ghana",
+                                "zambia", "botswana", "uganda", "zimbabwe", "ethiopia", "malawi"}:
+                _region_tags = {"east_africa", "west_africa", "southern_africa"}
+            elif _country_tag in {"india", "bangladesh", "sri lanka", "nepal", "pakistan"}:
+                _region_tags = {"south_asia"}
+            elif _country_tag in {"saudi arabia", "uae", "egypt", "jordan", "qatar"}:
+                _region_tags = {"middle_east"}
+            elif _country_tag in {"brazil", "mexico", "colombia", "argentina"}:
+                _region_tags = {"latam", "americas"}
+            elif _country_tag in {"indonesia", "philippines", "malaysia", "thailand", "vietnam"}:
+                _region_tags = {"apac"}
+
+            fallback = None
+            if _region_tags and _CURATED_ELEVENLABS_VOICES:
+                for v in _CURATED_ELEVENLABS_VOICES:
+                    v_regions = set(v.get("best_for_regions", []))
+                    if v_regions & _region_tags:
+                        fallback = v
+                        break
+            if not fallback and _CURATED_ELEVENLABS_VOICES:
                 fallback = _CURATED_ELEVENLABS_VOICES[0]
+
+            if fallback:
                 primary_voice_id = fallback["voice_id"]
                 primary_name = f"{fallback['name']} (Auto)"
                 fallback_gender = fallback.get("labels", {}).get("gender", "female")
-                logger.info(f"[{self.name}] Empty primary voice_id; using curated fallback: {primary_name} ({fallback_gender})")
+                logger.info(f"[{self.name}] Empty primary voice_id; using region-aware fallback for '{country}': {primary_name} ({fallback_gender})")
 
         primary_gender = (
             voice_selection.get("selected_voice", {}).get("gender", "").lower()
@@ -1120,41 +1228,7 @@ class AudioProducerAgent(BaseAgent):
                 alt_candidates.append((alt_id, alt_name, gender_hint))
                 seen_ids.add(alt_id)
 
-        # ── Try fetching premium voices from API for more variety ──
-        api_female: list[tuple[str, str]] = []
-        api_male: list[tuple[str, str]] = []
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{ELEVENLABS_BASE_URL}/v2/voices",
-                    headers={"xi-api-key": ELEVENLABS_API_KEY},
-                    params={"page_size": 100},
-                    timeout=10.0,
-                )
-                if resp.status_code == 200:
-                    voices = resp.json().get("voices", [])
-                    for v in voices:
-                        vid = v.get("voice_id", "")
-                        if not vid or vid in seen_ids:
-                            continue
-                        name = v.get("name", "")
-                        labels = v.get("labels", {})
-                        gender = labels.get("gender", "").lower()
-                        accent = labels.get("accent", "")
-                        cat = v.get("category", "")
-                        if cat in ("professional", "high_quality", "cloned"):
-                            label = f"{name} (Female, {accent})" if gender == "female" else f"{name} (Male, {accent})"
-                            if gender == "female":
-                                api_female.append((vid, label))
-                            elif gender == "male":
-                                api_male.append((vid, label))
-                    random.shuffle(api_female)
-                    random.shuffle(api_male)
-                    logger.info(f"[{self.name}] API voices: {len(api_female)}F + {len(api_male)}M premium/cloned")
-        except Exception as e:
-            logger.debug(f"[{self.name}] API voice fetch skipped: {e}")
-
-        # ── Region-aware curated fallbacks (expanded) ──
+        # ── Region detection (used for API accent priority + curated fallbacks) ──
         _country_lower = country.lower().strip()
         is_african = _country_lower in {
             "nigeria", "kenya", "tanzania", "south africa", "ghana",
@@ -1184,90 +1258,211 @@ class AudioProducerAgent(BaseAgent):
             "japan", "china", "mongolia", "laos",
         }
 
+        # ── Try fetching premium voices from API for more variety ──
+        api_female: list[tuple[str, str]] = []
+        api_male: list[tuple[str, str]] = []
+        preferred_accents: set[str] = set()
+        if is_african:
+            preferred_accents = {"african", "nigerian", "kenyan", "south african", "neutral", ""}
+        elif is_south_asian:
+            preferred_accents = {"indian", "south asian", "neutral", ""}
+        elif is_middle_east:
+            preferred_accents = {"arabic", "middle eastern", "neutral", ""}
+        elif is_latam:
+            preferred_accents = {"latin", "spanish", "brazilian", "neutral", ""}
+        elif is_apac:
+            preferred_accents = {"asian", "filipino", "indonesian", "neutral", ""}
+
+        # Search accents to query from the shared voice library
+        _shared_accent_queries: list[str] = []
+        if is_african:
+            _shared_accent_queries = ["african", "nigerian", "kenyan", "south african"]
+        elif is_south_asian:
+            _shared_accent_queries = ["indian"]
+        elif is_middle_east:
+            _shared_accent_queries = ["arabic", "middle eastern"]
+        elif is_latam:
+            _shared_accent_queries = ["latin american", "mexican", "brazilian"]
+        elif is_apac:
+            _shared_accent_queries = ["filipino", "indonesian", "malaysian"]
+
+        api_female_preferred: list[tuple[str, str]] = []
+        api_male_preferred: list[tuple[str, str]] = []
+        try:
+            async with httpx.AsyncClient() as client:
+                # 1. Check user's own library first
+                resp = await client.get(
+                    f"{ELEVENLABS_BASE_URL}/v2/voices",
+                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    params={"page_size": 100},
+                    timeout=10.0,
+                )
+                if resp.status_code == 200:
+                    voices = resp.json().get("voices", [])
+                    for v in voices:
+                        vid = v.get("voice_id", "")
+                        if not vid or vid in seen_ids:
+                            continue
+                        name = v.get("name", "")
+                        labels = v.get("labels", {})
+                        gender = labels.get("gender", "").lower()
+                        accent = labels.get("accent", "").lower()
+                        cat = v.get("category", "")
+                        if cat in ("professional", "high_quality", "cloned"):
+                            display_accent = labels.get("accent", "Neutral") or "Neutral"
+                            label = f"{name} (Female, {display_accent})" if gender == "female" else f"{name} (Male, {display_accent})"
+                            is_preferred = accent in preferred_accents if preferred_accents else False
+                            if gender == "female":
+                                if is_preferred:
+                                    api_female_preferred.append((vid, label))
+                                else:
+                                    api_female.append((vid, label))
+                            elif gender == "male":
+                                if is_preferred:
+                                    api_male_preferred.append((vid, label))
+                                else:
+                                    api_male.append((vid, label))
+
+                # 2. Search shared voice library for region-specific accented voices
+                if _shared_accent_queries and (len(api_female_preferred) + len(api_male_preferred) < 3):
+                    for accent_q in _shared_accent_queries[:2]:
+                        for gender_q in ("female", "male"):
+                            try:
+                                shared_resp = await client.get(
+                                    f"{ELEVENLABS_BASE_URL}/v1/shared-voices",
+                                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                                    params={
+                                        "page_size": 5,
+                                        "accent": accent_q,
+                                        "gender": gender_q,
+                                        "language": "en",
+                                    },
+                                    timeout=8.0,
+                                )
+                                if shared_resp.status_code == 200:
+                                    shared_voices = shared_resp.json().get("voices", [])
+                                    for sv in shared_voices:
+                                        svid = sv.get("voice_id", "")
+                                        if not svid or svid in seen_ids:
+                                            continue
+                                        sv_name = sv.get("name", "Shared Voice")
+                                        sv_accent = sv.get("accent", accent_q.title())
+                                        label = f"{sv_name} ({'Female' if gender_q == 'female' else 'Male'}, {sv_accent})"
+                                        seen_ids.add(svid)
+                                        if gender_q == "female":
+                                            api_female_preferred.append((svid, label))
+                                        else:
+                                            api_male_preferred.append((svid, label))
+                            except Exception:
+                                pass
+                    logger.info(
+                        f"[{self.name}] Shared library: found {len(api_female_preferred)}F + "
+                        f"{len(api_male_preferred)}M with accent '{_shared_accent_queries[0]}'"
+                    )
+
+                random.shuffle(api_female_preferred)
+                random.shuffle(api_male_preferred)
+                random.shuffle(api_female)
+                random.shuffle(api_male)
+                api_female = api_female_preferred + api_female
+                api_male = api_male_preferred + api_male
+                logger.info(f"[{self.name}] API voices: {len(api_female)}F + {len(api_male)}M (preferred accent first)")
+        except Exception as e:
+            logger.debug(f"[{self.name}] API voice fetch skipped: {e}")
+
+        # ── Region-aware curated fallbacks ──
+        # Determine display accent for the region
+        if is_african:
+            _accent_label = "African"
+        elif is_south_asian:
+            _accent_label = "South Asian"
+        elif is_middle_east:
+            _accent_label = "Middle Eastern"
+        elif is_latam:
+            _accent_label = "Latin"
+        elif is_apac:
+            _accent_label = "Asian"
+        else:
+            _accent_label = ""
+
         if is_south_asian:
             female_voices = [
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
-                ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female, British)"),
-                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
-                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
-                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
+                ("XB0fDUnXU5powFXDhCwa", f"Charlotte (Female, {_accent_label})"),
+                ("9BWtsMINqrJLrRacOk9x", f"Aria (Female, {_accent_label})"),
+                ("EXAVITQu4vr4xnSDxMaL", f"Sarah (Female, {_accent_label})"),
+                ("cgSgspJ2msm6clMCkdW9", f"Jessica (Female, {_accent_label})"),
+                ("jBpfuIE2acCO8z3wKNLl", f"Gigi (Female, {_accent_label})"),
+                ("pFZP5JQG7iQjIQuC4Bku", f"Lily (Female, {_accent_label})"),
             ]
             male_voices = [
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
-                ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
-                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
-                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+                ("N2lVS1w4EtoT3dr4eOWO", f"Callum (Male, {_accent_label})"),
+                ("cjVigY5qzO86Huf0OWal", f"Eric (Male, {_accent_label})"),
+                ("TX3LPaxmHKxFdv7VOQHJ", f"Liam (Male, {_accent_label})"),
+                ("onwK4e9ZLuTAKqWW03F9", f"Daniel (Male, {_accent_label})"),
+                ("IKne3meq5aSn9XLyUdCD", f"Charlie (Male, {_accent_label})"),
             ]
         elif is_african:
             female_voices = [
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
-                ("ThT5KcBeYPX3keUQqHPh", "Dorothy (Female, British)"),
-                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
-                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
-                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
+                ("XB0fDUnXU5powFXDhCwa", f"Charlotte (Female, {_accent_label})"),
+                ("9BWtsMINqrJLrRacOk9x", f"Aria (Female, {_accent_label})"),
+                ("EXAVITQu4vr4xnSDxMaL", f"Sarah (Female, {_accent_label})"),
+                ("cgSgspJ2msm6clMCkdW9", f"Jessica (Female, {_accent_label})"),
+                ("jBpfuIE2acCO8z3wKNLl", f"Gigi (Female, {_accent_label})"),
+                ("pFZP5JQG7iQjIQuC4Bku", f"Lily (Female, {_accent_label})"),
             ]
             male_voices = [
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
-                ("JBFqnCBsd6RMkjVDRZzb", "George (Male, British)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
-                ("nPczCjzI2devNBz1zQrb", "Brian (Male, American)"),
-                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
-                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
+                ("N2lVS1w4EtoT3dr4eOWO", f"Callum (Male, {_accent_label})"),
+                ("cjVigY5qzO86Huf0OWal", f"Eric (Male, {_accent_label})"),
+                ("TX3LPaxmHKxFdv7VOQHJ", f"Liam (Male, {_accent_label})"),
+                ("nPczCjzI2devNBz1zQrb", f"Brian (Male, {_accent_label})"),
+                ("onwK4e9ZLuTAKqWW03F9", f"Daniel (Male, {_accent_label})"),
             ]
         elif is_middle_east:
             female_voices = [
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
-                ("Xb7hH8MSUJpSbSDYk0k2", "Alice (Female, British)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
-                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
-                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
+                ("XB0fDUnXU5powFXDhCwa", f"Charlotte (Female, {_accent_label})"),
+                ("9BWtsMINqrJLrRacOk9x", f"Aria (Female, {_accent_label})"),
+                ("cgSgspJ2msm6clMCkdW9", f"Jessica (Female, {_accent_label})"),
+                ("jBpfuIE2acCO8z3wKNLl", f"Gigi (Female, {_accent_label})"),
+                ("EXAVITQu4vr4xnSDxMaL", f"Sarah (Female, {_accent_label})"),
+                ("pFZP5JQG7iQjIQuC4Bku", f"Lily (Female, {_accent_label})"),
             ]
             male_voices = [
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
-                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+                ("N2lVS1w4EtoT3dr4eOWO", f"Callum (Male, {_accent_label})"),
+                ("TX3LPaxmHKxFdv7VOQHJ", f"Liam (Male, {_accent_label})"),
+                ("cjVigY5qzO86Huf0OWal", f"Eric (Male, {_accent_label})"),
+                ("onwK4e9ZLuTAKqWW03F9", f"Daniel (Male, {_accent_label})"),
             ]
         elif is_latam:
             female_voices = [
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
-                ("21m00Tcm4TlvDq8ikWAM", "Rachel (Female, American)"),
-                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
-                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
+                ("XB0fDUnXU5powFXDhCwa", f"Charlotte (Female, {_accent_label})"),
+                ("EXAVITQu4vr4xnSDxMaL", f"Sarah (Female, {_accent_label})"),
+                ("9BWtsMINqrJLrRacOk9x", f"Aria (Female, {_accent_label})"),
+                ("cgSgspJ2msm6clMCkdW9", f"Jessica (Female, {_accent_label})"),
+                ("jBpfuIE2acCO8z3wKNLl", f"Gigi (Female, {_accent_label})"),
+                ("21m00Tcm4TlvDq8ikWAM", f"Rachel (Female, {_accent_label})"),
             ]
             male_voices = [
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
-                ("pNInz6obpgDQGcFmaJgB", "Adam (Male, American)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
-                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+                ("TX3LPaxmHKxFdv7VOQHJ", f"Liam (Male, {_accent_label})"),
+                ("cjVigY5qzO86Huf0OWal", f"Eric (Male, {_accent_label})"),
+                ("N2lVS1w4EtoT3dr4eOWO", f"Callum (Male, {_accent_label})"),
+                ("pNInz6obpgDQGcFmaJgB", f"Adam (Male, {_accent_label})"),
+                ("onwK4e9ZLuTAKqWW03F9", f"Daniel (Male, {_accent_label})"),
             ]
         elif is_apac:
             female_voices = [
-                ("XB0fDUnXU5powFXDhCwa", "Charlotte (Female, Neutral)"),
-                ("9BWtsMINqrJLrRacOk9x", "Aria (Female, American)"),
-                ("pFZP5JQG7iQjIQuC4Bku", "Lily (Female, British)"),
-                ("cgSgspJ2msm6clMCkdW9", "Jessica (Female, American)"),
-                ("jBpfuIE2acCO8z3wKNLl", "Gigi (Female, American)"),
-                ("EXAVITQu4vr4xnSDxMaL", "Sarah (Female, American)"),
+                ("XB0fDUnXU5powFXDhCwa", f"Charlotte (Female, {_accent_label})"),
+                ("9BWtsMINqrJLrRacOk9x", f"Aria (Female, {_accent_label})"),
+                ("cgSgspJ2msm6clMCkdW9", f"Jessica (Female, {_accent_label})"),
+                ("jBpfuIE2acCO8z3wKNLl", f"Gigi (Female, {_accent_label})"),
+                ("EXAVITQu4vr4xnSDxMaL", f"Sarah (Female, {_accent_label})"),
+                ("pFZP5JQG7iQjIQuC4Bku", f"Lily (Female, {_accent_label})"),
             ]
             male_voices = [
-                ("onwK4e9ZLuTAKqWW03F9", "Daniel (Male, British)"),
-                ("TX3LPaxmHKxFdv7VOQHJ", "Liam (Male, American)"),
-                ("cjVigY5qzO86Huf0OWal", "Eric (Male, American)"),
-                ("IKne3meq5aSn9XLyUdCD", "Charlie (Male, Australian)"),
-                ("N2lVS1w4EtoT3dr4eOWO", "Callum (Male, Transatlantic)"),
+                ("N2lVS1w4EtoT3dr4eOWO", f"Callum (Male, {_accent_label})"),
+                ("TX3LPaxmHKxFdv7VOQHJ", f"Liam (Male, {_accent_label})"),
+                ("cjVigY5qzO86Huf0OWal", f"Eric (Male, {_accent_label})"),
+                ("onwK4e9ZLuTAKqWW03F9", f"Daniel (Male, {_accent_label})"),
+                ("IKne3meq5aSn9XLyUdCD", f"Charlie (Male, {_accent_label})"),
             ]
         else:
             female_voices = [
@@ -1413,12 +1608,17 @@ class AudioProducerAgent(BaseAgent):
             for eid, lbl in el_pool:
                 voice_pool.append({"el_voice_id": eid, "voice_label": lbl})
 
+        el_language_code = _country_to_elevenlabs_lang_code(country, language)
+        accent_desc = _get_accent_description(country)
+
         return {
             "tts_engine": tts_engine,
             "voice_settings": voice_settings,
             "voice_name": voice_name,
             "el_voice_id": el_voice_id,
             "el_model_id": el_model_id,
+            "el_language_code": el_language_code,
+            "el_accent_desc": accent_desc,
             "edge_voice": edge_voice,
             "murf_voice_id": murf_voice_id,
             "murf_locale": murf_locale,
@@ -1437,6 +1637,8 @@ class AudioProducerAgent(BaseAgent):
         voice_settings = engine_ctx["voice_settings"]
         el_voice_id = engine_ctx["el_voice_id"]
         el_model_id = engine_ctx["el_model_id"]
+        el_language_code = engine_ctx.get("el_language_code")
+        el_accent_desc = engine_ctx.get("el_accent_desc", "")
         edge_voice = engine_ctx["edge_voice"]
 
         async def _tts_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -1477,6 +1679,8 @@ class AudioProducerAgent(BaseAgent):
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
                         custom_bgm_path=custom_bgm,
+                        language_code=el_language_code,
+                        accent_desc=el_accent_desc,
                     )
                 else:
                     result = await self._generate_edge_tts(
@@ -1551,6 +1755,8 @@ class AudioProducerAgent(BaseAgent):
                             output_path=job["path"],
                             model_id=el_model_id,
                             skip_bgm=True,
+                            language_code=el_language_code,
+                            accent_desc=el_accent_desc,
                         )
                     elif tts_engine == "murf":
                         result = await self._generate_murf_tts(
@@ -1629,8 +1835,6 @@ class AudioProducerAgent(BaseAgent):
             hook_text = script.get("hook", "")
             if not hook_text or not hook_text.strip():
                 hook_text = script.get("full_script", "")
-                if hook_text:
-                    hook_text = hook_text[:200]
 
             if not hook_text or not hook_text.strip():
                 continue

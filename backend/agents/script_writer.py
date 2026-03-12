@@ -50,7 +50,9 @@ Also use CAPITALIZATION for emphasis and ellipses (...) for dramatic pauses.
 
 RULES:
 - Total script (hook+body+cta) MUST be under {max_words} words (~30 seconds)
-- Use the local language words but ALWAYS write them in LATIN/ROMAN script (English letters). \
+- Write scripts STRICTLY in the language specified by the LANGUAGE REQUIREMENT below. \
+If no language requirement is given, default to English.
+- When writing in a non-English language, ALWAYS use LATIN/ROMAN script (English letters). \
 NEVER use native scripts like Amharic (ገ), Arabic (ع), Hindi (ह), Thai (ก), etc. \
 Transliterate all local language words into English characters. \
 Example: write "Selam" not "ሰላም", write "Namaste" not "नमस्ते", write "Marhaba" not "مرحبا".
@@ -194,12 +196,23 @@ class ScriptWriterAgent(BaseAgent):
         ids = ", ".join(str(start_id + i) for i in range(count))
 
         lang_instruction = ""
-        if language_override:
+        if language_override and language_override.lower().startswith("english"):
+            lang_instruction = (
+                "\n\nCRITICAL LANGUAGE REQUIREMENT: ALL scripts MUST be written entirely in ENGLISH. "
+                "Do NOT use any local language words except for 1-2 culturally relevant greetings "
+                "(e.g. 'Dumela', 'Jambo') for flavor. The script body, CTA, fallbacks, and closure "
+                "must all be in English."
+            )
+        elif language_override:
             lang_instruction = (
                 f"\n\nCRITICAL LANGUAGE REQUIREMENT: ALL scripts MUST use {language_override} words and phrases. "
                 f"However, ALWAYS write using LATIN/ROMAN letters (English alphabet) — transliterate, "
                 f"do NOT use native script characters. For example if {language_override} is Amharic, "
                 f"write 'Selam' not 'ሰላም'. Mix with English for brand names and technical terms."
+            )
+        else:
+            lang_instruction = (
+                "\n\nLANGUAGE REQUIREMENT: Write all scripts in ENGLISH by default."
             )
 
         user_prompt = f"""\
@@ -314,11 +327,20 @@ Under {max_words} words per script. Output valid JSON with "scripts" array of {c
             feedback_text = json.dumps(feedback, indent=2)[:2000]
 
         lang_instruction = ""
-        if language_override:
+        if language_override and language_override.lower().startswith("english"):
+            lang_instruction = (
+                "\n\nCRITICAL: ALL scripts MUST remain in ENGLISH. "
+                "Do NOT switch to any local language."
+            )
+        elif language_override:
             lang_instruction = (
                 f"\n\nCRITICAL: ALL scripts MUST remain in {language_override} words, "
                 f"but written in LATIN/ROMAN letters (transliterated). "
                 f"Do NOT use native script characters."
+            )
+        else:
+            lang_instruction = (
+                "\n\nCRITICAL: ALL scripts MUST remain in ENGLISH."
             )
 
         scripts = previous_scripts.get("scripts", [])
