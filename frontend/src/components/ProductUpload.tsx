@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, X, Loader2 } from "lucide-react";
+import { Upload, FileText, X, Loader2, Maximize2 } from "lucide-react";
 
 interface ProductUploadProps {
   value: string;
@@ -21,6 +21,7 @@ export default function ProductUpload({
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [expandOpen, setExpandOpen] = useState(false);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -156,10 +157,19 @@ export default function ProductUpload({
 
       {/* Or paste text */}
       <div className="relative">
-        <div className="absolute inset-x-0 top-0 flex items-center justify-center -mt-3 z-10">
+        <div className="absolute inset-x-0 top-0 flex items-center justify-between -mt-3 z-10 px-1">
           <span className="px-3 text-xs text-[var(--text-tertiary)] bg-[var(--card)]">
             or paste product description
           </span>
+          <button
+            type="button"
+            onClick={() => setExpandOpen(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-[var(--accent)] bg-[var(--card)] border border-[var(--card-border)] hover:bg-[var(--accent-subtle)] transition-colors"
+            title="Expand to edit pricing, short codes, and tables without missing lines"
+          >
+            <Maximize2 className="w-3 h-3" />
+            Expand
+          </button>
         </div>
         <textarea
           value={value}
@@ -169,9 +179,50 @@ export default function ProductUpload({
           }}
           placeholder="Paste your product documentation, features, pricing, and details here..."
           rows={5}
-          className="w-full mt-2 px-4 py-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/20 resize-none transition-all"
+          className="w-full mt-2 px-4 py-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/20 resize-y transition-all min-h-[120px]"
         />
+        <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+          Tip: Use <strong>Expand</strong> for long specs so price and short codes stay visible. Markdown/tables paste well — agent reads structured text better than one long paragraph.
+        </p>
       </div>
+
+      {/* Expanded editor overlay */}
+      {expandOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Expanded product description"
+        >
+          <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-[var(--card)] border border-[var(--card-border)] shadow-xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--card-border)]">
+              <span className="text-sm font-semibold text-[var(--text-primary)]">
+                Product description — full editor
+              </span>
+              <button
+                type="button"
+                onClick={() => setExpandOpen(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)] text-white hover:brightness-110"
+              >
+                Done
+              </button>
+            </div>
+            <textarea
+              value={value}
+              onChange={(e) => {
+                onChange(e.target.value);
+                if (e.target.value && !fileName) onFileNameChange("pasted-text");
+              }}
+              placeholder="Paste or edit everything here: pricing, short codes, USSD, packs, terms..."
+              className="flex-1 min-h-[50vh] w-full px-4 py-3 text-sm text-[var(--text-primary)] bg-[var(--input-bg)] border-0 focus:outline-none resize-none"
+              autoFocus
+            />
+            <div className="px-4 py-2 border-t border-[var(--card-border)] text-[10px] text-[var(--text-tertiary)]">
+              {value.length} characters · Include currency and daily/weekly/monthly if applicable
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

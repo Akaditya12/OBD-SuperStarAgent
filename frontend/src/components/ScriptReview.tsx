@@ -67,12 +67,12 @@ function ScriptCard({
           source_language: script.language,
         }),
       });
-      if (!res.ok) throw new Error("Translation failed");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Translation failed");
       setTranslation(data.translated);
       setShowTranslation(true);
-    } catch {
-      setTranslation("Translation failed. Please try again.");
+    } catch (err) {
+      setTranslation(err instanceof Error ? err.message : "Translation failed. Please try again.");
       setShowTranslation(true);
     } finally {
       setTranslating(false);
@@ -170,35 +170,56 @@ function ScriptCard({
             </div>
           )}
 
-          {/* Hook */}
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-red-400">
-              Hook (0-5s)
-            </span>
-            <p className="mt-1 text-sm text-gray-300 leading-relaxed">
-              {highlightAudioTags(script.hook)}
-            </p>
-          </div>
+          {/* Flow steps (when flow_config was used) */}
+          {script.segments && script.segments.length > 0 ? (
+            <div className="space-y-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--accent)]">
+                Flow steps (one audio file per step)
+              </span>
+              {script.segments.map((seg, idx) => (
+                <div key={seg.step_id} className="p-3 rounded-lg bg-[var(--background)] border border-[var(--card-border)]">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--accent)]">
+                    Step {idx + 1}: {seg.step_id.replace(/_/g, " ")}
+                  </span>
+                  <p className="mt-1 text-sm text-gray-300 leading-relaxed">
+                    {highlightAudioTags(seg.text)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Hook */}
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-red-400">
+                  Hook (0-5s)
+                </span>
+                <p className="mt-1 text-sm text-gray-300 leading-relaxed">
+                  {highlightAudioTags(script.hook)}
+                </p>
+              </div>
 
-          {/* Body */}
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-brand-400">
-              Body (5-23s)
-            </span>
-            <p className="mt-1 text-sm text-gray-300 leading-relaxed">
-              {highlightAudioTags(script.body)}
-            </p>
-          </div>
+              {/* Body */}
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-brand-400">
+                  Body (5-23s)
+                </span>
+                <p className="mt-1 text-sm text-gray-300 leading-relaxed">
+                  {highlightAudioTags(script.body)}
+                </p>
+              </div>
 
-          {/* CTA */}
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--success)]">
-              CTA (23-30s)
-            </span>
-            <p className="mt-1 text-sm text-gray-300 leading-relaxed">
-              {highlightAudioTags(script.cta)}
-            </p>
-          </div>
+              {/* CTA */}
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--success)]">
+                  CTA (23-30s)
+                </span>
+                <p className="mt-1 text-sm text-gray-300 leading-relaxed">
+                  {highlightAudioTags(script.cta)}
+                </p>
+              </div>
+            </>
+          )}
 
           <div className="h-px bg-[var(--card-border)]" />
 

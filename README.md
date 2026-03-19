@@ -91,19 +91,28 @@ cd OBD_SuperStarAgent
 cp .env.example .env   # edit with keys
 ```
 
-**Backend**
+**Recommended: one command (backend + frontend)**
 
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+./scripts/restart_app.sh
 ```
 
-**Frontend**
+Logs: `tail -f backend.log` and `tail -f frontend.log`. Open **http://localhost:3000**
 
-```bash
-cd frontend && npm install && npm run dev
-```
+**Or start separately**
+
+- **Backend** (must run detached or it can suspend during "Generate Full Audio"):
+  ```bash
+  python3 -m venv venv && source venv/bin/activate
+  pip install -r backend/requirements.txt
+  ./scripts/start_backend.sh
+  ```
+  Do not run `uvicorn ...` in the foreground; use `start_backend.sh` or `restart_app.sh` so stdout is redirected and the process cannot suspend.
+
+- **Frontend**
+  ```bash
+  cd frontend && npm install && npm run dev
+  ```
 
 Open **http://localhost:3000**
 

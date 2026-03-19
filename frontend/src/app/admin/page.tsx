@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
     Loader2, Users, Shield, UserPlus, RefreshCw,
     Settings, Save, RotateCcw, Mic2, FileText, Volume2,
-    Bot, ChevronDown, ChevronUp, Undo2,
+    Bot, ChevronDown, ChevronUp, Undo2, KeyRound, X,
 } from "lucide-react";
 
 interface User {
@@ -28,6 +28,8 @@ interface PipelineConfig {
     voice_stability: number;
     voice_similarity_boost: number;
     voice_style: number;
+    /** OBD prompt speaking rate: 1.0 = natural, <1 slower, >1 faster */
+    voice_speed: number;
     bgm_volume_db: number;
     bgm_default_style: string;
     default_tts_engine: string;
@@ -38,11 +40,12 @@ const DEFAULTS: PipelineConfig = {
     num_script_variants: 5,
     eval_feedback_rounds: 1,
     num_hook_voices: 3,
-    elevenlabs_tts_model: "eleven_multilingual_v2",
+    elevenlabs_tts_model: "eleven_v3",
     elevenlabs_output_format: "mp3_44100_192",
     voice_stability: 0.35,
     voice_similarity_boost: 0.80,
     voice_style: 0.45,
+    voice_speed: 1.0,
     bgm_volume_db: -26,
     bgm_default_style: "upbeat",
     default_tts_engine: "elevenlabs",
@@ -89,6 +92,11 @@ export default function AdminPage() {
     const [formData, setFormData] = useState({
         username: "", email: "", password: "", role: "member", team: "Core",
     });
+    const [resetPasswordUser, setResetPasswordUser] = useState<User | null>(null);
+    const [resetPasswordNew, setResetPasswordNew] = useState("");
+    const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
+    const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+    const [resetPasswordError, setResetPasswordError] = useState("");
 
     // ── Pipeline Config State ──
     const [config, setConfig] = useState<PipelineConfig>(DEFAULTS);
@@ -134,7 +142,7 @@ export default function AdminPage() {
             const res = await fetch("/api/admin/config");
             if (res.ok) {
                 const data = await res.json();
-                setConfig({ ...DEFAULTS, ...data });
+                setConfig({ ...DEFAULTS, ...data, voice_speed: typeof data.voice_speed === "number" ? data.voice_speed : DEFAULTS.voice_speed });
             }
         } catch { /* ignore */ }
         finally { setConfigLoading(false); }
@@ -224,6 +232,50 @@ export default function AdminPage() {
         } catch (err: any) { setError(err.message); }
     };
 
+    const openResetPassword = (user: User) => {
+        setResetPasswordUser(user);
+        setResetPasswordNew("");
+        setResetPasswordConfirm("");
+        setResetPasswordError("");
+    };
+    const closeResetPassword = () => {
+        setResetPasswordUser(null);
+        setResetPasswordNew("");
+        setResetPasswordConfirm("");
+        setResetPasswordError("");
+    };
+    const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setResetPasswordError("");
+        if (!resetPasswordUser) return;
+        if (resetPasswordNew.length < 6) {
+            setResetPasswordError("Password must be at least 6 characters");
+            return;
+        }
+        if (resetPasswordNew !== resetPasswordConfirm) {
+            setResetPasswordError("Passwords do not match");
+            return;
+        }
+        setResetPasswordLoading(true);
+        try {
+            const res = await fetch(`/api/admin/users/${resetPasswordUser.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: resetPasswordNew }),
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || "Failed to reset password");
+            }
+            closeResetPassword();
+            fetchUsers();
+        } catch (err: any) {
+            setResetPasswordError(err.message);
+        } finally {
+            setResetPasswordLoading(false);
+        }
+    };
+
     const updateConfig = (key: keyof PipelineConfig, value: number | string) => {
         setConfig((prev) => ({ ...prev, [key]: value }));
         setConfigDirty(true);
@@ -240,7 +292,7 @@ export default function AdminPage() {
             });
             if (!res.ok) throw new Error("Failed to save");
             const data = await res.json();
-            setConfig({ ...DEFAULTS, ...data });
+            setConfig({ ...DEFAULTS, ...data, voice_speed: typeof data.voice_speed === "number" ? data.voice_speed : DEFAULTS.voice_speed });
             setConfigDirty(false);
             setConfigMsg("Settings saved successfully");
             setTimeout(() => setConfigMsg(""), 3000);
@@ -399,9 +451,14 @@ export default function AdminPage() {
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <button onClick={() => toggleUserStatus(user.id, user.is_active)} className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-border)] transition-colors">
-                                                    {user.is_active ? "Deactivate" : "Activate"}
-                                                </button>
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button type="button" onClick={() => openResetPassword(user)} className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-border)] transition-colors inline-flex items-center gap-1" title="Reset password">
+                                                        <KeyRound className="w-3.5 h-3.5" /> Reset Password
+                                                    </button>
+                                                    <button type="button" onClick={() => toggleUserStatus(user.id, user.is_active)} className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-border)] transition-colors">
+                                                        {user.is_active ? "Deactivate" : "Activate"}
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -416,6 +473,41 @@ export default function AdminPage() {
                             </table>
                         </div>
                     </div>
+
+                    {/* Reset Password Modal */}
+                    {resetPasswordUser && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={closeResetPassword}>
+                            <div className="bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold text-[var(--text-primary)]">Reset password</h3>
+                                    <button type="button" onClick={closeResetPassword} className="p-1 rounded-lg hover:bg-[var(--card-border)] transition-colors" aria-label="Close">
+                                        <X className="w-5 h-5 text-[var(--text-secondary)]" />
+                                    </button>
+                                </div>
+                                <p className="text-sm text-[var(--text-secondary)] mb-4">
+                                    Set a new password for <span className="font-medium text-[var(--text-primary)]">{resetPasswordUser.username}</span> ({resetPasswordUser.email}).
+                                </p>
+                                <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">New password</label>
+                                        <input type="password" value={resetPasswordNew} onChange={(e) => setResetPasswordNew(e.target.value)} placeholder="Min 6 characters" className="w-full px-4 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--input-bg)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]" autoComplete="new-password" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Confirm password</label>
+                                        <input type="password" value={resetPasswordConfirm} onChange={(e) => setResetPasswordConfirm(e.target.value)} placeholder="Re-enter password" className="w-full px-4 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--input-bg)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]" autoComplete="new-password" />
+                                    </div>
+                                    {resetPasswordError && <p className="text-sm text-[var(--error)]">{resetPasswordError}</p>}
+                                    <div className="flex gap-2 justify-end pt-2">
+                                        <button type="button" onClick={closeResetPassword} className="px-4 py-2 rounded-xl text-sm font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card-border)] transition-colors">Cancel</button>
+                                        <button type="submit" disabled={resetPasswordLoading} className="px-4 py-2 rounded-xl text-sm font-medium text-white flex items-center gap-2 transition-colors disabled:opacity-60" style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}>
+                                            {resetPasswordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                            {resetPasswordLoading ? "Resetting..." : "Reset password"}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
 
@@ -487,9 +579,11 @@ export default function AdminPage() {
                                     <div>
                                         <label className={labelCls}>ElevenLabs Model</label>
                                         <select value={config.elevenlabs_tts_model} onChange={(e) => updateConfig("elevenlabs_tts_model", e.target.value)} className={inputCls}>
-                                            <option value="eleven_multilingual_v2">Multilingual V2 (recommended)</option>
-                                            <option value="eleven_turbo_v2_5">Turbo V2.5 (faster)</option>
+                                            <option value="eleven_v3">Eleven v3 (recommended — 70+ languages, accent control)</option>
+                                            <option value="eleven_multilingual_v2">Multilingual V2 (stable fallback)</option>
+                                            <option value="eleven_turbo_v2_5">Turbo V2.5 (faster, less expressive)</option>
                                         </select>
+                                        <p className="text-[10px] text-[var(--text-tertiary)] mt-1">v3 is what the pipeline prefers; v2/v2.5 remain for compatibility.</p>
                                     </div>
                                     <div>
                                         <label className={labelCls}>Voice Options per Variant</label>
@@ -503,7 +597,22 @@ export default function AdminPage() {
                                         <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Number of voice previews to generate</p>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-6">
+                                    <div>
+                                        <label className={labelCls}>
+                                            OBD voice speed ({(config.voice_speed ?? 1).toFixed(2)}) — {(config.voice_speed ?? 1) === 1 ? "natural" : (config.voice_speed ?? 1) < 1 ? "slower" : "faster"}
+                                        </label>
+                                        <input
+                                            type="range"
+                                            min={0.75}
+                                            max={1.25}
+                                            step={0.05}
+                                            value={config.voice_speed ?? 1}
+                                            onChange={(e) => updateConfig("voice_speed", Number(e.target.value))}
+                                            className="w-full accent-[var(--accent)]"
+                                        />
+                                        <p className="text-[10px] text-[var(--text-tertiary)] mt-1">1.0 = default natural pace for phone prompts; adjust if callers need clearer or quicker delivery.</p>
+                                    </div>
                                     <div>
                                         <label className={labelCls}>Stability ({config.voice_stability.toFixed(2)})</label>
                                         <input type="range" min={0.1} max={0.9} step={0.05} value={config.voice_stability} onChange={(e) => updateConfig("voice_stability", Number(e.target.value))} className="w-full accent-[var(--accent)]" />

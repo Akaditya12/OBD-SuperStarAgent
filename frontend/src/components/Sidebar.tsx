@@ -39,8 +39,16 @@ const NAV_ITEMS = [
 
 const ADMIN_NAV_ITEM = { href: "/admin", label: "Admin Panel", icon: Shield };
 
+/**
+ * BNG Products shown in the sidebar dropdown.
+ * To add a new product:
+ * 1. Add an entry here: { id: "myproduct", label: "My Product", icon: SomeIcon } (use a Lucide icon from imports).
+ * 2. In app/product/[id]/page.tsx: add "myproduct" to ICON_MAP, PRODUCT_FLOWS, and PRODUCT_STATS.
+ * 3. In ProductPresets.tsx: add a fallback preset in FALLBACK_RAW with id: "myproduct" (same id as above) so /product/myproduct resolves.
+ * 4. Optional: add a row to Supabase product_presets table for API-driven content.
+ */
 const BNG_PRODUCT_LIST = [
-    { id: "eva", label: "EVA", icon: Sparkles },
+    { id: "ai-personal-assistant", label: "AI personal assistant", icon: Sparkles },
     { id: "smartconnect", label: "SmartConnect AI", icon: Radio },
     { id: "callsignature", label: "Call Signature", icon: Shield },
     { id: "magicvoice", label: "Magic Voice", icon: Mic2 },

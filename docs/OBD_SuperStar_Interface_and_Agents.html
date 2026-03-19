@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OBD SuperStar Agent — Interface, logic &amp; agent system</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.55;
+      color: #1a1a1a;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2rem 2rem 2.5rem;
+    }
+    .brand { color: #555; font-size: 0.9rem; margin-bottom: 0.5rem; }
+    h1 { font-size: 1.65rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.2rem; margin-top: 1.75rem; margin-bottom: 0.5rem; border-bottom: 2px solid #e0e0e0; padding-bottom: 0.35rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.1rem; margin-bottom: 0.35rem; }
+    p { margin: 0.5rem 0; }
+    .lead { font-size: 1.02rem; color: #222; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 0.75rem 0 1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem 0.65rem; text-align: left; vertical-align: top; }
+    th { background: #f0f0f0; }
+    ul { margin: 0.4rem 0; padding-left: 1.25rem; }
+    li { margin: 0.3rem 0; }
+    .flow-img { max-width: 100%; height: auto; margin: 1rem 0; border: 1px solid #ddd; border-radius: 6px; }
+    .box { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.9rem 1rem; margin: 0.9rem 0; font-size: 0.9rem; }
+    .note { font-size: 0.85rem; color: #666; margin-top: 2rem; }
+    @media print {
+      body { padding: 1rem; max-width: none; }
+      h2 { page-break-after: avoid; }
+      table { page-break-inside: avoid; }
+      .flow-img { max-width: 95%; }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>OBD SuperStar Agent</h1>
+  <p class="brand">Interface, logic &amp; agent system</p>
+
+  <h2>1. Brief explanation of the project</h2>
+  <p class="lead">
+    <strong>OBD SuperStar Agent</strong> is an AI-powered application for telecom and VAS teams who need
+    <strong>outbound dialer (OBD)</strong> campaigns: short, persuasive call scripts and
+    <strong>broadcast-quality audio</strong> in the right language and regional style.
+  </p>
+  <p>
+    Users provide <strong>product documentation</strong> (or paste an existing script), choose
+    <strong>country</strong>, <strong>operator (telco)</strong>, and <strong>language</strong>. The system runs
+    a chain of six specialised AI agents that analyse the product, research the market, write and evaluate
+    scripts (with an optional feedback loop), select a market-appropriate voice, and produce mixed audio
+    (voice + optional background music).
+  </p>
+  <p><strong>What you get:</strong> Multiple script variants tuned to the market, audio files ready for your OBD platform, and optional save to a dashboard. <strong>Script to Voice</strong> is a separate flow: paste any script → pick country and voice → generate audio without running the full pipeline.</p>
+
+  <h2>2. High-level architecture (flow)</h2>
+  <p>
+    The Web UI sends the request to the FastAPI backend, which runs the six agents in sequence.
+    Agents 3 (Script Writer) and 4 (Eval Panel) form a <strong>feedback loop</strong>; once scripts are approved,
+    the flow continues to Voice Selector and Audio Producer, and the final output returns to the Web UI.
+  </p>
+  <img src="architecture-flow.png" alt="Flow: Web UI → FastAPI → Agent 1–6 with feedback loop → Web UI" class="flow-img" />
+  <p style="font-size:0.9rem; color:#555;"></p>
+
+  <h2>3. User interface (Web UI)</h2>
+  <h3>3.1 Home (main campaign flow)</h3>
+  <table>
+    <tr><th>Step</th><th>What the user sees</th><th>Logic</th></tr>
+    <tr><td><strong>1. Configure</strong></td><td>Product input, country, telco, language, promotion type, TTS engine, cache options.</td><td>Cache check can allow skipping Product Analysis + Market Research when reusing the same market.</td></tr>
+    <tr><td><strong>2. Generate</strong></td><td>Pipeline Progress (7 steps) with real-time updates; “Back to configure” if stuck.</td><td><code>POST /api/generate/start</code> → WebSocket <code>/ws/progress/{id}</code> and polling for status.</td></tr>
+    <tr><td><strong>3. Results</strong></td><td>Scripts (expand/copy/edit), voice rationale, hook previews, “Generate Full Audio”, save to dashboard, download.</td><td>Full audio generated on demand; campaigns can be saved for the team.</td></tr>
+  </table>
+  <h3>3.2 Script to Voice</h3>
+  <p>Paste or upload script → choose country, language, TTS engine, speed → voice previews → pick voice → generate final audio → download or save. Only <strong>Agent 6 (Audio Producer)</strong> runs.</p>
+  <h3>3.3 Dashboard &amp; Admin</h3>
+  <p>Dashboard lists saved campaigns (play/download). Admin: pipeline settings (TTS model, voice speed, BGM, etc.), user management, and overridable agent prompts.</p>
+
+  <h2>4. Backend logic (FastAPI)</h2>
+  <p>REST endpoints for start/status, cache, campaigns, auth, admin. WebSocket <code>/ws/progress/{session_id}</code> streams progress. A background task runs the six-agent pipeline and broadcasts each step to the UI.</p>
+
+  <h2>5. The six-agent system</h2>
+  <table>
+    <tr><th>#</th><th>Agent</th><th>Role</th><th>Input → Output</th></tr>
+    <tr><td>1</td><td>Product Analyzer</td><td>Structured brief from product docs</td><td><strong>In:</strong> Product document. <strong>Out:</strong> Brief (features, benefits, IVR angles).</td></tr>
+    <tr><td>2</td><td>Market Researcher</td><td>Market picture for country/telco</td><td><strong>In:</strong> Brief + country + telco. <strong>Out:</strong> Audience, culture, tone, promotion ideas.</td></tr>
+    <tr><td>3</td><td>Script Writer</td><td>OBD scripts in required language/length</td><td><strong>In:</strong> Brief + market + language. <strong>Out:</strong> Variants (hook, body, CTA, fallbacks).</td></tr>
+    <tr><td>4</td><td>Eval Panel</td><td>Quality-check scripts</td><td><strong>In:</strong> Scripts. <strong>Out:</strong> Scores and feedback → feeds back to Script Writer (loop).</td></tr>
+    <tr><td>3 again</td><td>Script revision</td><td>Rewrite using eval feedback</td><td><strong>In:</strong> Scripts + feedback. <strong>Out:</strong> Revised variants.</td></tr>
+    <tr><td>5</td><td>Voice Selector</td><td>Choose voice for market and tone</td><td><strong>In:</strong> Scripts + market + voices. <strong>Out:</strong> Primary + alternatives + rationale.</td></tr>
+    <tr><td>6</td><td>Audio Producer</td><td>Generate speech and mix for broadcast</td><td><strong>In:</strong> Script + voice + country + BGM. <strong>Out:</strong> Hook previews, then full MP3/WAV (ElevenLabs / Murf / edge-tts).</td></tr>
+  </table>
+  <div class="box"><strong>Feedback loop:</strong> Agent 3 → Agent 4 → (revision) → Agent 3 → … → Agent 5 → Agent 6.</div>
+
+  <h2>6. Technology stack</h2>
+  <p>Frontend: Next.js 15, React 19, Tailwind. Backend: Python FastAPI, WebSockets. LLM: Azure OpenAI. TTS: ElevenLabs (eleven_v3), Murf AI, edge-tts. DB: Supabase or SQLite. Auth: JWT when configured.</p>
+
+  <p class="note">OBD SuperStar Agent · blackNgreen ·</p>
+
+</body>
+</html>

@@ -2,26 +2,66 @@
 
 import { Package, Sparkles, Phone, Shield, Mic2, Radio, Gamepad2, Plane, BookOpen, Cross, Moon, GraduationCap } from "lucide-react";
 
+export type ProductPresetCategory = "ai" | "voice" | "connectivity" | "enterprise" | "entertainment" | "education" | "lifestyle";
+
 export interface ProductPreset {
   id: string;
   name: string;
   icon: React.ReactNode;
   shortDesc: string;
   fullDescription: string;
-  category: "ai" | "voice" | "connectivity" | "enterprise" | "entertainment" | "education" | "lifestyle";
+  category: ProductPresetCategory;
 }
 
-export const BNG_PRODUCTS: ProductPreset[] = [
+/** API shape (icon as string). */
+export interface ProductPresetFromAPI {
+  id: string;
+  name: string;
+  icon: string;
+  shortDesc: string;
+  fullDescription: string;
+  category: ProductPresetCategory;
+  displayOrder?: number;
+}
+
+const ICON_MAP: Record<string, React.ReactNode> = {
+  Package: <Package className="w-4 h-4" />,
+  Sparkles: <Sparkles className="w-4 h-4" />,
+  Phone: <Phone className="w-4 h-4" />,
+  Shield: <Shield className="w-4 h-4" />,
+  Mic2: <Mic2 className="w-4 h-4" />,
+  Radio: <Radio className="w-4 h-4" />,
+  Gamepad2: <Gamepad2 className="w-4 h-4" />,
+  Plane: <Plane className="w-4 h-4" />,
+  BookOpen: <BookOpen className="w-4 h-4" />,
+  Cross: <Cross className="w-4 h-4" />,
+  Moon: <Moon className="w-4 h-4" />,
+  GraduationCap: <GraduationCap className="w-4 h-4" />,
+};
+
+export function mapApiPresetToProductPreset(p: ProductPresetFromAPI): ProductPreset {
+  return {
+    id: p.id,
+    name: p.name,
+    icon: ICON_MAP[p.icon] ?? <Package className="w-4 h-4" />,
+    shortDesc: p.shortDesc,
+    fullDescription: p.fullDescription,
+    category: p.category,
+  };
+}
+
+/** Fallback data when API is unavailable (icon as string). */
+const FALLBACK_RAW: ProductPresetFromAPI[] = [
   {
-    id: "eva",
-    name: "EVA - AI Personal Assistant",
-    icon: <Sparkles className="w-4 h-4" />,
+    id: "ai-personal-assistant",
+    name: "AI personal assistant",
+    icon: "Sparkles",
     shortDesc: "AI assistant that handles calls when you're busy",
     category: "ai",
-    fullDescription: `EVA - AI Personal Assistant on Voice Call
+    fullDescription: `AI personal assistant on Voice Call
 
 Product Overview:
-EVA is a voice-first AI conversational assistant designed for telecom subscribers. When a user is busy, unavailable, or on another call, EVA answers on their behalf — acting as a smart, AI-powered personal assistant.
+Personal Assitant is a voice-first AI conversational assistant designed for telecom subscribers. When a user is busy, unavailable, or on another call, EVA answers on their behalf — acting as a smart, AI-powered personal assistant.
 
 Key Features:
 - Answers calls when the subscriber is busy, unavailable, or on DND
@@ -31,39 +71,16 @@ Key Features:
 - Learns the subscriber's preferences over time for personalized responses
 - Works on any phone — no app download required, activated via USSD/SMS
 
-How It Works:
-1. Caller dials subscriber → subscriber is busy/unavailable
-2. Call is forwarded to EVA
-3. EVA greets the caller naturally and asks how it can help
-4. EVA takes messages, schedules callbacks, or provides information
-5. Subscriber receives a summary of the call with action items
+Shortcode / CTA:
+
 
 Pricing:
-- Subscription: $0.30 to $3 per user per month (varies by market)
-- Expected penetration: 5-8% of subscriber base
-
-Value Proposition for Subscribers:
-- Never miss an important call again
-- Professional call handling 24/7
-- Smart scheduling and message taking
-- Works in local languages
-
-Value Proposition for Telcos:
-- New recurring revenue stream with zero CAPEX
-- Revenue share model — no upfront investment
-- Reduces churn by adding sticky value-added service
-- Increases ARPU by $0.30-$3 per active user
-- Quick deployment — 4-6 weeks to launch
-
-Subscription Mechanism:
-- USSD activation: Dial *123# → Select EVA → Subscribe
-- SMS activation: Send "EVA" to short code
-- OBD promotion: Press 1 to activate during promotional call`,
+`,
   },
   {
     id: "smartconnect",
     name: "SmartConnect AI",
-    icon: <Radio className="w-4 h-4" />,
+    icon: "Radio",
     shortDesc: "Zero-balance revenue & engagement platform",
     category: "connectivity",
     fullDescription: `SmartConnect AI - Revenue & Engagement Platform
@@ -79,31 +96,16 @@ Key Features:
 - No base requirement — traffic comes automatically from the network
 - Zero complaints — user initiates the interaction voluntarily
 
-How It Works:
-1. Subscriber with low/zero balance tries to make a call
-2. Instead of "insufficient balance" tone, call routes to SmartConnect
-3. SmartConnect greets user and offers relevant solutions
-4. User selects option → service delivered instantly
+Shortcode / CTA:
 
-Revenue Impact:
-- 5% revenue uplift for operators
-- 25% improvement in subscriber retention
-- Handles 8-9 million calls daily per operator
 
-Value Proposition:
-- FREE platform — no promotion cost needed
-- Daily automatic traffic of millions of users
-- Users are voluntarily engaging (not push marketing)
-- No spam complaints or Truecaller blocking issues
-
-Subscription Mechanism:
-- Automatic — no subscription needed
-- User is routed when they have insufficient balance`,
+Pricing:
+`,
   },
   {
     id: "callsignature",
     name: "Call Signature",
-    icon: <Shield className="w-4 h-4" />,
+    icon: "Shield",
     shortDesc: "Verified business caller ID with 93% pickup rate",
     category: "enterprise",
     fullDescription: `Call Signature - Named CLI & Verified Caller ID
@@ -119,24 +121,16 @@ Key Features:
 - Anti-spam protection — calls are never flagged by Truecaller or network filters
 - Analytics dashboard showing pickup rates, call duration, and engagement
 
-How It Works:
-1. Business registers their brand and call purposes
-2. When making outbound calls, caller ID shows business name + purpose
-3. Recipient sees "BNG Services - Product Offer" instead of unknown number
-4. Pickup rate increases to 93%+ because call appears trustworthy
+Shortcode / CTA:
 
-Revenue Impact:
-- 93% call pickup rate (vs 15-20% for unknown numbers)
-- 4x improvement in OBD campaign effectiveness
 
-Subscription Mechanism:
-- Enterprise API integration
-- Self-service portal for campaign management`,
+Pricing:
+`,
   },
   {
     id: "magicvoice",
     name: "Magic Voice",
-    icon: <Mic2 className="w-4 h-4" />,
+    icon: "Mic2",
     shortDesc: "World's #1 voice changer for calls — voice avatars & ambience",
     category: "voice",
     fullDescription: `Magic Voice - World's #1 Voice Changer
@@ -148,29 +142,19 @@ Key Features:
 - Real-time voice changing during live calls — voice avatars: Female, Cartoon, Celebrity, Kid
 - Background ambience effects: Concert, Airport, Traffic, James Bond
 - Available on IVR (dial short-code + mobile number) and Mobile App
-- IVR flow: User dials short-code → selects voice/ambience → call connected to B-party with changed voice
-- App flow: Register → Choose a voice → Dial a number → Enjoy the call
-- Subscription via SMS download link, web landing page, or banner ads
 - Works with standard phone calls — no internet needed for the call
+- Subscription via SMS download link, web landing page, or banner ads
 
-Global Presence:
-- Deployed with partners across Nigeria, Ivory Coast, Indonesia, Cambodia, Jordan, Yemen, Zambia, Uganda, Mongolia
-- Partnerships with MTN, Orange, Mobicom and other major operators
+Shortcode / CTA:
 
-Deployment Timeline:
-- Week 1: Hardware/cloud finalization
-- Week 2-3: Installation
-- Week 3: Testing & Go Live
 
-Subscription Mechanism:
-- User selects desired pack on landing page
-- Activation confirmation via SMS with product link
-- Available through IVR short-code or app download`,
+Pricing:
+`,
   },
   {
     id: "magiccall",
     name: "Magic Call App",
-    icon: <Phone className="w-4 h-4" />,
+    icon: "Phone",
     shortDesc: "Voice changer & caller entertainment app (20M+ downloads)",
     category: "voice",
     fullDescription: `Magic Call App - Voice Changer & Caller Entertainment
@@ -186,26 +170,16 @@ Key Features:
 - Works with regular phone calls — no internet needed for the call itself
 - Available on Android and iOS
 
-Growth Metrics:
-- 20 million+ downloads
-- Rapid viral growth through word-of-mouth
-- High daily active user engagement
+Shortcode / CTA:
 
-Revenue Model:
-- Freemium with premium voice packs
-- In-app purchases for special effects
-- Subscription for unlimited access
 
-Value for Telcos:
-- Drives voice call minutes (users make more calls for fun)
-- Co-branding opportunity with operator
-- Data revenue from app usage
-- Youth segment engagement`,
+Pricing:
+`,
   },
   {
     id: "dreamtravel",
     name: "DreamTravel",
-    icon: <Plane className="w-4 h-4" />,
+    icon: "Plane",
     shortDesc: "Interactive quiz platform — win dream travel trips",
     category: "entertainment",
     fullDescription: `DreamTravel - Unlock Rewards with Every Challenge
@@ -222,37 +196,16 @@ Key Features:
 - All-expenses-paid trip as the grand prize, plus discounts and telco offers
 - Plus-one option: winners bring a companion
 
-How It Works:
-1. Customers opt-in through SMS, IVR, or website
-2. Subscribe and join the quiz
-3. Answer fun and interactive quizzes related to travel or brand themes
-4. Win a dream vacation, discounts, or telco offers
-5. Winners receive all-expenses-paid trip to dream destination
+Shortcode / CTA:
 
-Engagement Model:
-- Gamification drives frequent use and in-app purchases
-- Unlock levels and earn rewards, encouraging longer engagement
-- Challenges keep users coming back, increasing data usage and plan upgrades
 
-Revenue Model:
-- Subscription-based: revenue share with telecom operators
-- Flexible and customizable commercial model
-- Rapid 6-week deployment
-
-Deployment Timeline:
-- Week 1: Agreements and commercial closure
-- Week 2: VM allocation
-- Week 3: API integration
-- Week 4: UAT
-- Week 5: Billing integration
-- Week 6: Go Live
-
-Scale: 160+ telecom partners, 90+ countries, 290Mn+ monthly users served`,
+Pricing:
+`,
   },
   {
     id: "mobibattle",
     name: "MobiBattle",
-    icon: <Gamepad2 className="w-4 h-4" />,
+    icon: "Gamepad2",
     shortDesc: "Real-time competitive gaming platform for telcos",
     category: "entertainment",
     fullDescription: `MobiBattle - A Real-Time Competitive Gaming Platform
@@ -269,31 +222,16 @@ Key Features:
 - 50+ casual games, top e-sports titles
 - Rewards: data packs, airtime, prizes
 
-How It Works (Casual Games):
-1. User selects a game from listed games
-2. Play free games or play with MobiBattle coins/credits
-3. Recommendation system finds live opponent
-4. Matched opponents play against each other in real-time
+Shortcode / CTA:
 
-How It Works (E-Sports):
-1. User registers for upcoming tournaments via MobiBattle coins
-2. Receives Tournament ID & password
-3. Participates in tournaments on the native game app
-4. Returns to MobiBattle portal to view results & rewards
 
-What's In It for Operators:
-- Be at the forefront of e-sports revolution in your country
-- Capture loyalty and brand recognition of age group 18-35
-- Generate GMV of $2M per million digital customers
-- Increase data usage per gamer by 20%
-- Increase engagement by 81%, revenue jump by 85%, lower acquisition cost by 90%
-
-Deployment: Full hosting on cloud (2 weeks) + Billing integration (2 weeks) = Go Live (4 weeks)`,
+Pricing:
+`,
   },
   {
     id: "swipenwin",
     name: "SwipeNWin",
-    icon: <BookOpen className="w-4 h-4" />,
+    icon: "BookOpen",
     shortDesc: "Gamified quiz platform — swipe, play, triumph",
     category: "entertainment",
     fullDescription: `SwipeNWin - Unleash Your Quiz Superpowers
@@ -312,26 +250,16 @@ Key Features:
 - Customizable in multiple languages
 - Subscription-based with buy-more-chances option
 
-Quiz Categories:
-- World Travel, History, Science, Pop Culture, Sports, Geography, Entertainment, General Knowledge and more
-- Addition/deletion of categories based on user behavior and trends
+Shortcode / CTA:
 
-Revenue Model:
-- Subscription-based product
-- Buy more chances anytime (in-app purchase)
-- Daily/weekly/monthly prizes drive engagement
-- High engagement gamified experience
 
-Value for Telcos:
-- Gamified quiz experience drives daily active usage
-- Enhanced leaderboard creates competitive retention
-- Event-based and spot quizzes keep content fresh
-- Customizable per operator and market`,
+Pricing:
+`,
   },
   {
     id: "islamicportal",
     name: "Islamic Portal",
-    icon: <Moon className="w-4 h-4" />,
+    icon: "Moon",
     shortDesc: "Islamic content platform — Quran, Duas, Salat alerts",
     category: "lifestyle",
     fullDescription: `Islamic Portal - Connect with Your Faith
@@ -349,27 +277,18 @@ Key Features:
 - Educational Islamic videos
 - Islamic wallpapers
 - Content available in regional languages
-
-Channels:
-- App: Home, Prayer Alerts, Mosque Finder, Holy Quran (read/listen), Dua, Prayer Timing Settings
-- WAP/Web: Audio & Text Quran, Duas (Rabbanas & Rukyahs), Hadith, Nasheeds, 99 Names of Allah, Videos, Wallpapers
-- IVR: Audio Quran, Duas, Hadith, Nasheeds, 99 Names of Allah — regional language support
-- SMS: Quran Verses, Islamic Facts, Daily Hadith, Salat Alerts
-
-Scale & Impact:
-- 42 million users
-- 20+ countries
-- Touching lives of thousands more every day
-- Over 1.6 billion potential audience (second largest religion, 1400 years of tradition)
-
-Subscription Mechanism:
 - Available via IVR, App, WAP, SMS
-- Subscription packs with auto-renewal`,
+
+Shortcode / CTA:
+
+
+Pricing:
+`,
   },
   {
     id: "christianity",
     name: "Christianity Portal",
-    icon: <Cross className="w-4 h-4" />,
+    icon: "Cross",
     shortDesc: "Christian content platform — Bible, prayers, gospel songs",
     category: "lifestyle",
     fullDescription: `Christianity Portal - Stay Connected to Your Faith
@@ -387,33 +306,18 @@ Key Features:
 - Morning/Evening Glory devotionals
 - Exclusive Christian videos
 - Daily Feed Story
+- Available via App and IVR
 
-Subscription Flow (Web):
-1. User subscribes on web using Header Enrichment
-2. Receives confirmation SMS with App link
-3. Downloads App from Google Play Store
-4. Subscribed user logs in instantly
+Shortcode / CTA:
 
-Subscription Flow (USSD):
-1. User dials USSD code or short code for IVR subscription
-2. Follows simple selection to subscribe
-3. Receives confirmation SMS after successful subscription
 
-App Flow:
-- Home: Access to daily verse, stories, and live streaming
-- Live Streaming/Glory: Live prayer exclusively for subscribers
-- Read/Listen Verse: Read or listen to Bible daily
-- Books Collection: 1000+ audiobooks and ebooks
-- Manage Settings: Biblical stories, gospel songs, and user settings
-
-Scale & Impact:
-- 42 million users, 32+ countries
-- Touching lives of thousands more every day`,
+Pricing:
+`,
   },
   {
     id: "learnenglish",
     name: "Learn English",
-    icon: <GraduationCap className="w-4 h-4" />,
+    icon: "GraduationCap",
     shortDesc: "Interactive English learning platform via IVR & Web",
     category: "education",
     fullDescription: `Learn English - Empower Your Subscribers
@@ -429,42 +333,44 @@ Key Features:
 - Available via IVR and Web platforms
 - Interactive and gamified learning experience
 
-Benefits for Telcos:
-- Subscriber Management: drives daily engagement
-- New Revenue Stream: subscription-based model
-- Enhanced Customer Loyalty: educational value retains subscribers
-- Competitive Edge: unique VAS offering in the market
+Shortcode / CTA:
 
-Why English Matters (Target Markets):
-- Education and Research opportunities
-- Employment Opportunities in global markets
-- Travel and Tourism communication
-- Cultural Exchange and connectivity
 
-Subscription Mechanism:
-- IVR-based subscription via short code
-- Web-based subscription
-- SMS-driven content delivery`,
+Pricing:
+`,
   },
   {
     id: "custom",
     name: "Custom Product",
-    icon: <Package className="w-4 h-4" />,
+    icon: "Package",
     shortDesc: "Upload your own product documentation",
     category: "enterprise",
     fullDescription: "",
   },
 ];
 
+export function getFallbackPresets(): ProductPreset[] {
+  return FALLBACK_RAW.map(mapApiPresetToProductPreset);
+}
+
+/** @deprecated Use presets from API + getFallbackPresets() for fallback. Kept for backwards compatibility. */
+export const BNG_PRODUCTS: ProductPreset[] = getFallbackPresets();
+
 interface ProductPresetsProps {
   selectedProduct: string;
   onSelect: (product: ProductPreset) => void;
+  /** Presets from API; when null or empty, fallback to built-in list. */
+  presets?: ProductPreset[] | null;
 }
 
 export default function ProductPresets({
   selectedProduct,
   onSelect,
+  presets = null,
 }: ProductPresetsProps) {
+  const displayPresets = (presets?.length ? presets : getFallbackPresets()).filter(
+    (p) => p.id !== "smartconnect"
+  );
   return (
     <div className="space-y-3">
       <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
@@ -476,7 +382,7 @@ export default function ProductPresets({
       </label>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-        {BNG_PRODUCTS.filter((p) => p.id !== "smartconnect").map((product) => {
+        {displayPresets.map((product) => {
           const isSelected = selectedProduct === product.id;
           return (
             <button

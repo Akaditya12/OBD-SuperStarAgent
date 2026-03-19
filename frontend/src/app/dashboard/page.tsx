@@ -64,6 +64,13 @@ export default function DashboardPage() {
   const [translatingKey, setTranslatingKey] = useState<string | null>(null);
   const [showTranslation, setShowTranslation] = useState<Record<string, boolean>>({});
 
+  // Edit scripts (dashboard): campaignId -> list of scripts (editable copy)
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [editedScripts, setEditedScripts] = useState<Script[] | null>(null);
+  const [savingScripts, setSavingScripts] = useState(false);
+  const [regeneratingAudioCampaignId, setRegeneratingAudioCampaignId] = useState<string | null>(null);
+  const [regeneratingAudioVariantId, setRegeneratingAudioVariantId] = useState<number | null>(null);
+
   // ── Auth Check ──
   useEffect(() => {
     fetch("/api/auth/me")
@@ -120,7 +127,7 @@ export default function DashboardPage() {
       } catch { /* silent */ }
     };
     fetchActivity();
-    const interval = setInterval(fetchActivity, 15000);
+    const interval = setInterval(fetchActivity, 30000);
     return () => clearInterval(interval);
   }, [authChecked]);
 
@@ -216,6 +223,90 @@ export default function DashboardPage() {
     }
   };
 
+  // ── Edit scripts (dashboard) ──
+  const startEditScripts = (campaignId: string, scriptList: Script[]) => {
+    setEditingCampaignId(campaignId);
+    setEditedScripts(JSON.parse(JSON.stringify(scriptList)));
+  };
+  const cancelEditScripts = () => {
+    setEditingCampaignId(null);
+    setEditedScripts(null);
+  };
+  const saveScripts = async () => {
+    if (!editingCampaignId || !editedScripts) return;
+    setSavingScripts(true);
+    try {
+      const res = await fetch(`/api/campaigns/${editingCampaignId}/scripts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scripts: editedScripts }),
+      });
+      if (res.ok) {
+        toast("success", "Scripts updated");
+        setEditingCampaignId(null);
+        setEditedScripts(null);
+        if (expandedId === editingCampaignId) {
+          const d = await fetch(`/api/campaigns/${editingCampaignId}`).then((r) => r.json());
+          setDetail(d);
+        }
+      } else {
+        const err = await res.json();
+        toast("error", err.error || "Failed to save scripts");
+      }
+    } catch {
+      toast("error", "Failed to save scripts");
+    } finally {
+      setSavingScripts(false);
+    }
+  };
+
+  // ── Regenerate audio (dashboard): same voice, current scripts; optional single variant ──
+  const regenerateCampaignAudio = async (campaignId: string, variantId?: number) => {
+    setRegeneratingAudioCampaignId(campaignId);
+    setRegeneratingAudioVariantId(variantId ?? null);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/regenerate-audio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(variantId != null ? { variant_id: variantId } : {}),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        toast("error", err.error || "Failed to start regeneration");
+        return;
+      }
+      const { job_id } = await res.json();
+      const poll = async (): Promise<void> => {
+        for (let i = 0; i < 120; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const j = await fetch(`/api/audio-jobs/${job_id}`).then((r) => r.json());
+            if (j.status === "done") {
+              toast("success", variantId != null ? `Variant ${variantId} audio regenerated (same voice & BGM)` : "Audio regenerated with same voice & BGM");
+              if (expandedId === campaignId) {
+                const d = await fetch(`/api/campaigns/${campaignId}`).then((r) => r.json());
+                setDetail(d);
+              }
+              loadCampaigns();
+              return;
+            }
+            if (j.status === "error") {
+              toast("error", j.error || "Audio regeneration failed");
+              return;
+            }
+          } catch { /* retry */ }
+        }
+        toast("error", "Regeneration timed out");
+      };
+      await poll();
+    } catch {
+      toast("error", "Failed to regenerate audio");
+    } finally {
+      setRegeneratingAudioCampaignId(null);
+      setRegeneratingAudioVariantId(null);
+    }
+  };
+
   // ── Delete campaign ──
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete campaign "${name}"? This cannot be undone.`)) return;
@@ -247,12 +338,12 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, source_language: lang }),
       });
-      if (!res.ok) throw new Error("Translation failed");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Translation failed");
       setTranslations((prev) => ({ ...prev, [key]: data.translated }));
       setShowTranslation((prev) => ({ ...prev, [key]: true }));
-    } catch {
-      toast("error", "Translation failed. Please try again.");
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "Translation failed. Please try again.");
     } finally {
       setTranslatingKey(null);
     }
@@ -576,39 +667,77 @@ export default function DashboardPage() {
                             })() : (
                             <>
                             {/* Global session actions */}
-                            <div className="flex items-center justify-between pb-3 border-b border-[var(--card-border)] mb-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--card-border)] mb-4">
                               <h4 className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-semibold">
                                 Campaign Assets
                               </h4>
-                              <div className="flex items-center gap-2">
-                                <a
-                                  href={`/api/sessions/${campaign.id}/scripts?fmt=text`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
-                                >
-                                  <Download className="w-2.5 h-2.5" />
-                                  Scripts (Text)
-                                </a>
-                                <a
-                                  href={`/api/sessions/${campaign.id}/scripts?fmt=json`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
-                                >
-                                  <Download className="w-2.5 h-2.5" />
-                                  Scripts (JSON)
-                                </a>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {editingCampaignId === campaign.id ? (
+                                  <>
+                                    <button
+                                      onClick={saveScripts}
+                                      disabled={savingScripts}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium text-white bg-[var(--accent)] hover:opacity-90 disabled:opacity-50"
+                                    >
+                                      {savingScripts ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : null}
+                                      Save scripts
+                                    </button>
+                                    <button
+                                      onClick={cancelEditScripts}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:bg-[var(--card)] border border-[var(--card-border)]"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => startEditScripts(campaign.id, scripts)}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                                    >
+                                      <FileText className="w-2.5 h-2.5" />
+                                      Edit scripts
+                                    </button>
+                                    <button
+                                      onClick={() => regenerateCampaignAudio(campaign.id)}
+                                      disabled={!!regeneratingAudioCampaignId}
+                                      title="Regenerate all variants with same voice & BGM"
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-[var(--accent)] hover:bg-[var(--accent-subtle)] border border-[var(--accent)]/30 disabled:opacity-50"
+                                    >
+                                      {regeneratingAudioCampaignId === campaign.id && regeneratingAudioVariantId === null ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Mic2 className="w-2.5 h-2.5" />}
+                                      {regeneratingAudioCampaignId === campaign.id && regeneratingAudioVariantId === null ? "Regenerating all…" : "Regenerate all audio"}
+                                    </button>
+                                    <a
+                                      href={`/api/sessions/${campaign.id}/scripts?fmt=text`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                                    >
+                                      <Download className="w-2.5 h-2.5" />
+                                      Scripts (Text)
+                                    </a>
+                                    <a
+                                      href={`/api/sessions/${campaign.id}/scripts?fmt=json`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                                    >
+                                      <Download className="w-2.5 h-2.5" />
+                                      Scripts (JSON)
+                                    </a>
+                                  </>
+                                )}
                               </div>
                             </div>
 
                             {/* Script + Audio paired cards */}
-                            {scripts.length > 0 && (
+                            {(editingCampaignId === campaign.id && editedScripts ? editedScripts : scripts).length > 0 && (
                               <div className="space-y-2.5">
-                                {scripts.map((script: Script, idx: number) => {
+                                {(editingCampaignId === campaign.id && editedScripts ? editedScripts : scripts).map((script: Script, idx: number) => {
                                   const vid = script.variant_id || idx + 1;
                                   const variantAudio = audioByVariant[vid] || [];
                                   const audioSessionId = detail?.result?.audio?.session_id || detail?.result?.session_id || "";
+                                  const isEditing = editingCampaignId === campaign.id && editedScripts;
 
                                   return (
                                     <div
@@ -621,15 +750,17 @@ export default function DashboardPage() {
                                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
                                             V{vid}
                                           </span>
-                                          <a
-                                            href={`/api/sessions/${campaign.id}/scripts?fmt=text&variant_id=${vid}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            title="Download this script variant"
-                                            className="p-1 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
-                                          >
-                                            <Download className="w-3 h-3" />
-                                          </a>
+                                          {!isEditing && (
+                                            <a
+                                              href={`/api/sessions/${campaign.id}/scripts?fmt=text&variant_id=${vid}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              title="Download this script variant"
+                                              className="p-1 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
+                                            >
+                                              <Download className="w-3 h-3" />
+                                            </a>
+                                          )}
                                           {script.theme && (
                                             <span className="text-xs font-medium text-[var(--text-secondary)]">
                                               {script.theme}
@@ -641,12 +772,61 @@ export default function DashboardPage() {
                                         </span>
                                       </div>
 
-                                      {/* Script text */}
-                                      {script.full_script && (
+                                      {/* Script text (editable when editing) */}
+                                      {isEditing ? (
+                                        script.segments && script.segments.length > 0 ? (
+                                          <div className="space-y-2 mb-3">
+                                            {(script.segments as { step_id: string; text: string }[]).map((seg, si) => (
+                                              <div key={seg.step_id}>
+                                                <label className="text-[10px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">
+                                                  Step: {seg.step_id.replace(/_/g, " ")}
+                                                </label>
+                                                <textarea
+                                                  value={seg.text}
+                                                  onChange={(e) => {
+                                                    const next = [...(editedScripts || [])];
+                                                    if (next[idx]?.segments) {
+                                                      const segs = (next[idx].segments as { step_id: string; text: string }[]).map((s, i) =>
+                                                        i === si ? { ...s, text: e.target.value } : s
+                                                      );
+                                                      next[idx] = {
+                                                        ...next[idx],
+                                                        segments: segs,
+                                                        full_script: segs.map((s) => s.text).join(" "),
+                                                        word_count: segs.reduce((w, s) => w + s.text.trim().split(/\s+/).filter(Boolean).length, 0),
+                                                      };
+                                                      next[idx].estimated_duration_seconds = Math.round((next[idx].word_count || 0) / 2.5 * 10) / 10;
+                                                      setEditedScripts(next);
+                                                    }
+                                                  }}
+                                                  className="w-full text-xs mt-0.5 p-2 rounded-lg bg-[var(--input-bg)] border border-[var(--card-border)] focus:ring-2 focus:ring-[var(--accent)]/30 min-h-[60px] resize-y"
+                                                  rows={2}
+                                                />
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <textarea
+                                            value={script.full_script || ""}
+                                            onChange={(e) => {
+                                              const next = [...(editedScripts || [])];
+                                              if (next[idx]) {
+                                                next[idx] = { ...next[idx], full_script: e.target.value };
+                                                const parts = e.target.value.trim().split(/\s+/).filter(Boolean);
+                                                next[idx].word_count = parts.length;
+                                                next[idx].estimated_duration_seconds = Math.round(parts.length / 2.5 * 10) / 10;
+                                                setEditedScripts(next);
+                                              }
+                                            }}
+                                            className="w-full text-xs text-[var(--text-secondary)] leading-relaxed mb-3 p-2 rounded-lg bg-[var(--input-bg)] border border-[var(--card-border)] focus:ring-2 focus:ring-[var(--accent)]/30 focus:border-[var(--accent)] min-h-[100px] resize-y"
+                                            rows={4}
+                                          />
+                                        )
+                                      ) : script.full_script ? (
                                         <p className="text-xs text-[var(--text-secondary)] leading-relaxed mb-3 whitespace-pre-wrap max-h-[150px] overflow-y-auto p-2 rounded-lg bg-[var(--input-bg)]/50 border border-[var(--card-border)]/50">
                                           {script.full_script}
                                         </p>
-                                      )}
+                                      ) : null}
 
                                       {/* Translate button */}
                                       {script.language && !script.language.toLowerCase().startsWith("english") && (
@@ -689,36 +869,45 @@ export default function DashboardPage() {
                                         </div>
                                       )}
 
-                                      {/* Audio controls inline */}
-                                      {variantAudio.length > 0 && (
-                                        <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
-                                          {variantAudio.map((af: AudioFile, ai: number) => {
-                                            const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
-                                            const label = af.file_name?.replace(/\.(mp3|wav)$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
-                                            const isPlaying = playingAudio === audioUrl;
-                                            return (
-                                              <div key={ai} className="flex items-center gap-1.5">
-                                                <button
-                                                  onClick={() => toggleAudio(audioUrl)}
-                                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${isPlaying
-                                                    ? "bg-[var(--accent)] text-white shadow-sm"
-                                                    : "bg-[var(--card)] border border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
-                                                    }`}
-                                                >
-                                                  <Play className={`w-2.5 h-2.5 ${isPlaying ? "animate-pulse" : ""}`} />
-                                                  {label}
-                                                </button>
-                                                <button
-                                                  onClick={() => forceDownload(audioUrl, af.file_name || "audio.mp3")}
-                                                  className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
-                                                >
-                                                  <Download className="w-2.5 h-2.5" />
-                                                </button>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
+                                      {/* Audio controls inline + Regenerate this variant */}
+                                      <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
+                                        {variantAudio.length > 0 && variantAudio.map((af: AudioFile, ai: number) => {
+                                          const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
+                                          const label = af.file_name?.replace(/\.(mp3|wav)$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
+                                          const isPlaying = playingAudio === audioUrl;
+                                          return (
+                                            <div key={ai} className="flex items-center gap-1.5">
+                                              <button
+                                                onClick={() => toggleAudio(audioUrl)}
+                                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${isPlaying
+                                                  ? "bg-[var(--accent)] text-white shadow-sm"
+                                                  : "bg-[var(--card)] border border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
+                                                  }`}
+                                              >
+                                                <Play className={`w-2.5 h-2.5 ${isPlaying ? "animate-pulse" : ""}`} />
+                                                {label}
+                                              </button>
+                                              <button
+                                                onClick={() => forceDownload(audioUrl, af.file_name || "audio.mp3")}
+                                                className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
+                                              >
+                                                <Download className="w-2.5 h-2.5" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
+                                        {!isEditing && (
+                                          <button
+                                            onClick={() => regenerateCampaignAudio(campaign.id, vid)}
+                                            disabled={!!regeneratingAudioCampaignId}
+                                            title="Regenerate only this variant (same voice & BGM)"
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] disabled:opacity-50"
+                                          >
+                                            {regeneratingAudioCampaignId === campaign.id && regeneratingAudioVariantId === vid ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Mic2 className="w-2.5 h-2.5" />}
+                                            {regeneratingAudioCampaignId === campaign.id && regeneratingAudioVariantId === vid ? "Regenerating…" : "Regenerate this variant"}
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                   );
                                 })}

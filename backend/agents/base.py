@@ -99,6 +99,15 @@ class BaseAgent(ABC):
         except asyncio.TimeoutError:
             logger.error(f"[{self.name}] Azure OpenAI call timed out after {timeout_seconds}s")
             raise TimeoutError(f"LLM call timed out after {timeout_seconds}s")
+        except Exception as e:
+            err_str = str(e).lower()
+            if "content_filter" in err_str or "content management policy" in err_str or "responsibleaipolicyviolation" in err_str:
+                logger.warning(f"[{self.name}] Azure content filter triggered: {e}")
+                raise ValueError(
+                    "A safety check blocked this step. Try again with a shorter or simpler product description, "
+                    "or rephrase any text that might look like instructions. If it keeps happening, contact your Azure OpenAI admin."
+                ) from e
+            raise
 
         # Log token usage and finish reason for debugging
         choice = response.choices[0]

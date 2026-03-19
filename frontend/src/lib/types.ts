@@ -3,6 +3,11 @@
  * These mirror the JSON structures returned by the backend pipeline.
  */
 
+export interface ScriptSegment {
+  step_id: string;
+  text: string;
+}
+
 export interface Script {
   variant_id: number;
   theme: string;
@@ -17,6 +22,17 @@ export interface Script {
   word_count: number;
   estimated_duration_seconds: number;
   audio_tags_used?: string[];
+  /** When flow_config was used: one prompt per step for multi-segment audio */
+  segments?: ScriptSegment[];
+}
+
+export interface FlowConfig {
+  id: string;
+  account_key: string;
+  service_key: string;
+  display_name: string;
+  steps: { id: string; purpose: string; max_words?: number }[];
+  is_default?: boolean;
 }
 
 export interface ScriptsResult {

@@ -2,6 +2,16 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Globe, Radio, Languages, ChevronDown, X } from "lucide-react";
+import { currencyHint } from "@/lib/countryCurrency";
+
+/** One country from API: id, name, currency_code, telcos[], languages[] */
+export interface MarketCountryOption {
+  id: string;
+  name: string;
+  currency_code: string;
+  telcos: string[];
+  languages: string[];
+}
 
 interface CountryTelcoSelectProps {
   country: string;
@@ -261,8 +271,32 @@ export default function CountryTelcoSelect({
   onTelcoChange,
   onLanguageChange,
 }: CountryTelcoSelectProps) {
-  const availableTelcos = country ? TELCOS[country] || [] : [];
-  const availableLanguages = country ? LANGUAGES[country] || [] : [];
+  const [marketOptions, setMarketOptions] = useState<MarketCountryOption[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/market-options")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((data: { countries?: MarketCountryOption[] }) => {
+        if (cancelled || !data.countries?.length) return;
+        setMarketOptions(data.countries);
+      })
+      .catch(() => {
+        if (!cancelled) setMarketOptions(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const countryOptions = marketOptions?.length ? marketOptions.map((c) => c.name) : COUNTRIES;
+  const selectedCountryData = marketOptions?.find((c) => c.name === country);
+  const availableTelcos = country
+    ? (selectedCountryData?.telcos ?? TELCOS[country] ?? [])
+    : [];
+  const availableLanguages = country
+    ? (selectedCountryData?.languages ?? LANGUAGES[country] ?? [])
+    : [];
+  const currencyDisplay =
+    selectedCountryData?.currency_code || (country ? currencyHint(country) : null) || null;
 
   return (
     <div className="space-y-5">
@@ -275,12 +309,18 @@ export default function CountryTelcoSelect({
             onLanguageChange("");
           }
         }}
-        options={COUNTRIES}
+        options={countryOptions}
         placeholder="Search or type a country..."
         icon={<Globe className="w-4 h-4 text-[var(--accent)]" />}
         label="Target Country"
         required
       />
+      {country && currencyDisplay && (
+        <p className="text-[10px] text-[var(--text-tertiary)] -mt-3 mb-1 px-1">
+          Typical currency: <strong className="text-[var(--text-secondary)]">{currencyDisplay}</strong>
+          — include pack prices in product text (daily/weekly/monthly); structured fields coming later.
+        </p>
+      )}
 
       <ComboBox
         value={telco}

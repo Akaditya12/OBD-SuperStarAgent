@@ -74,6 +74,166 @@ def init_db() -> None:
     finally:
         conn.close()
 
+
+# ── Product Presets (Supabase only) ───────────────────────────────────────────
+
+def list_product_presets() -> list[dict[str, Any]]:
+    """List all product presets from Supabase. Returns [] if not configured or on error."""
+    if not supabase:
+        return []
+    try:
+        response = supabase.table("product_presets").select(
+            "id, name, icon, short_desc, full_description, category, display_order"
+        ).order("display_order").order("id").execute()
+        return response.data or []
+    except Exception as e:
+        logger.error("Failed to list product presets from Supabase: %s", e)
+        return []
+
+
+def get_market_options() -> list[dict[str, Any]]:
+    """List countries with currency, and for each country the telcos and languages from Supabase.
+    Returns [] if not configured or on error. Each item: { id, name, currency_code, telcos: [], languages: [] }.
+    """
+    if not supabase:
+        return []
+    try:
+        countries_res = supabase.table("market_countries").select(
+            "id, name, currency_code, display_order"
+        ).order("display_order").order("id").execute()
+        countries = countries_res.data or []
+        if not countries:
+            return []
+        country_ids = [c["id"] for c in countries]
+        telcos_res = supabase.table("market_telcos").select(
+            "country_id, name, display_order"
+        ).in_("country_id", country_ids).order("display_order").order("name").execute()
+        langs_res = supabase.table("market_languages").select(
+            "country_id, name, display_order"
+        ).in_("country_id", country_ids).order("display_order").order("name").execute()
+        telcos_by_country: dict[str, list[str]] = {}
+        for row in (telcos_res.data or []):
+            cid = row["country_id"]
+            if cid not in telcos_by_country:
+                telcos_by_country[cid] = []
+            telcos_by_country[cid].append(row["name"])
+        langs_by_country: dict[str, list[str]] = {}
+        for row in (langs_res.data or []):
+            cid = row["country_id"]
+            if cid not in langs_by_country:
+                langs_by_country[cid] = []
+            langs_by_country[cid].append(row["name"])
+        return [
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "currency_code": c.get("currency_code", ""),
+                "telcos": telcos_by_country.get(c["id"], []),
+                "languages": langs_by_country.get(c["id"], []),
+            }
+            for c in countries
+        ]
+    except Exception as e:
+        logger.error("Failed to list market options from Supabase: %s", e)
+        return []
+
+
+# ── Flow Configs (Supabase only) ───────────────────────────────────────────────
+
+def list_flow_configs(account_key: str | None = None) -> list[dict[str, Any]]:
+    """List flow configs from Supabase. If account_key is set, only return configs for that account (e.g. telco). Returns [] if not configured or on error."""
+    if not supabase:
+        return []
+    try:
+        query = supabase.table("flow_configs").select(
+            "id, account_key, service_key, display_name, steps, is_default, created_at, updated_at"
+        ).order("account_key").order("service_key")
+        if account_key and str(account_key).strip():
+            query = query.eq("account_key", str(account_key).strip())
+        response = query.execute()
+        return response.data or []
+    except Exception as e:
+        logger.error("Failed to list flow configs from Supabase: %s", e)
+        return []
+
+
+def get_flow_config(flow_config_id: str | None = None, account_key: str | None = None, service_key: str | None = None) -> dict[str, Any] | None:
+    """Get a single flow config by id or by (account_key, service_key). Returns None if not found."""
+    if not supabase:
+        return None
+    try:
+        if flow_config_id:
+            response = supabase.table("flow_configs").select(
+                "id, account_key, service_key, display_name, steps, is_default, created_at, updated_at"
+            ).eq("id", flow_config_id).limit(1).execute()
+        elif account_key is not None and service_key is not None:
+            response = supabase.table("flow_configs").select(
+                "id, account_key, service_key, display_name, steps, is_default, created_at, updated_at"
+            ).eq("account_key", account_key).eq("service_key", service_key).limit(1).execute()
+        else:
+            return None
+        rows = response.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        logger.error("Failed to get flow config from Supabase: %s", e)
+        return None
+
+
+def create_flow_config(
+    account_key: str,
+    service_key: str,
+    display_name: str,
+    steps: list[dict[str, Any]],
+    is_default: bool = False,
+) -> dict[str, Any] | None:
+    """Insert a new flow config. Returns the created row or None on error/conflict."""
+    if not supabase:
+        return None
+    try:
+        row = {
+            "account_key": account_key.strip(),
+            "service_key": service_key.strip(),
+            "display_name": display_name.strip(),
+            "steps": steps,
+            "is_default": bool(is_default),
+        }
+        response = supabase.table("flow_configs").insert(row).execute()
+        data = response.data or []
+        return data[0] if data else None
+    except Exception as e:
+        logger.error("Failed to create flow config in Supabase: %s", e)
+        return None
+
+
+def update_flow_config(
+    flow_config_id: str,
+    *,
+    display_name: str | None = None,
+    steps: list[dict[str, Any]] | None = None,
+    is_default: bool | None = None,
+) -> dict[str, Any] | None:
+    """Update an existing flow config by id. Returns updated row or None."""
+    if not supabase:
+        return None
+    try:
+        updates: dict[str, Any] = {}
+        if display_name is not None:
+            updates["display_name"] = display_name.strip()
+        if steps is not None:
+            updates["steps"] = steps
+        if is_default is not None:
+            updates["is_default"] = bool(is_default)
+        if not updates:
+            return get_flow_config(flow_config_id=flow_config_id)
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        response = supabase.table("flow_configs").update(updates).eq("id", flow_config_id).execute()
+        data = response.data or []
+        return data[0] if data else None
+    except Exception as e:
+        logger.error("Failed to update flow config in Supabase: %s", e)
+        return None
+
+
 # ── Campaigns ─────────────────────────────────────────────────────────────────
 
 def save_campaign(
@@ -144,13 +304,16 @@ def save_campaign(
     return summary
 
 
-def list_campaigns(limit: int = 50) -> list[dict[str, Any]]:
-    """List all campaigns (without full result JSON)."""
+def list_campaigns(limit: int = 50, created_by: Optional[str] = None) -> list[dict[str, Any]]:
+    """List campaigns (without full result JSON). If created_by is set, only return that user's campaigns."""
     if supabase:
         try:
-            response = supabase.table("campaigns").select(
+            query = supabase.table("campaigns").select(
                 "id, name, created_by, team, created_at, country, telco, language, script_count, has_audio"
-            ).order("created_at", desc=True).limit(limit).execute()
+            ).order("created_at", desc=True).limit(limit)
+            if created_by is not None:
+                query = query.eq("created_by", created_by)
+            response = query.execute()
             return response.data
         except Exception as e:
             logger.error("Failed to list campaigns from Supabase: %s", e)
@@ -158,13 +321,23 @@ def list_campaigns(limit: int = 50) -> list[dict[str, Any]]:
 
     conn = _get_sqlite_conn()
     try:
-        rows = conn.execute(
-            """
-            SELECT id, name, created_by, team, created_at, country, telco, language, script_count, has_audio
-            FROM campaigns
-            ORDER BY created_at DESC LIMIT ?
-            """, (limit,)
-        ).fetchall()
+        if created_by is not None:
+            rows = conn.execute(
+                """
+                SELECT id, name, created_by, team, created_at, country, telco, language, script_count, has_audio
+                FROM campaigns
+                WHERE created_by = ?
+                ORDER BY created_at DESC LIMIT ?
+                """, (created_by, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, name, created_by, team, created_at, country, telco, language, script_count, has_audio
+                FROM campaigns
+                ORDER BY created_at DESC LIMIT ?
+                """, (limit,)
+            ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
@@ -178,13 +351,21 @@ def get_campaign(campaign_id: str) -> Optional[dict[str, Any]]:
     if supabase:
         try:
             response = supabase.table("campaigns").select("*").eq("id", campaign_id).maybe_single().execute()
-            data = response.data
+            if response is None:
+                logger.warning("Supabase get_campaign returned None for id=%s", campaign_id)
+                return None
+            data = getattr(response, "data", None)
             if not data:
                 return None
             data["result"] = data.pop("result_json", {})
             return data
         except Exception as e:
-            logger.error("Failed to get campaign from Supabase: %s", e)
+            # 406 Not Acceptable or connection errors: log warning so auto-update can skip without noise
+            msg = str(e)
+            if "406" in msg or "NoneType" in msg or "data" in msg:
+                logger.warning("Supabase get_campaign skipped for id=%s: %s", campaign_id, msg)
+            else:
+                logger.error("Failed to get campaign from Supabase: %s", e)
             return None
 
     conn = _get_sqlite_conn()

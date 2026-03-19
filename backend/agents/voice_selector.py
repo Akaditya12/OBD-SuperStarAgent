@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from backend.config import ELEVENLABS_API_KEY, ELEVENLABS_BASE_URL
+from backend.config import ELEVENLABS_API_KEY, ELEVENLABS_BASE_URL, get_elevenlabs_headers, elevenlabs_401_is_tts_only
 
 from .base import BaseAgent
 
@@ -52,13 +52,24 @@ SOUTH ASIAN MARKET GUIDANCE (India, Bangladesh, Sri Lanka, Nepal, Pakistan):
   Marathi, Gujarati), eleven_multilingual_v2 is MANDATORY.
 
 AFRICAN MARKET GUIDANCE (critical -- majority of our client base):
+- When the campaign language is ENGLISH and the country is in Africa, prefer voices whose
+  labels/accent are African, Nigerian, Kenyan, Ethiopian, Ghanaian, or Neutral -- NOT default
+  American. British can work for some East African markets but if the brief asks for
+  "African accent" or the audience expects local colour, pick library voices tagged African.
+  Ethiopia + English: prefer East African / African-accented voices; avoid flat American unless
+  the brief requires neutral international English.
 - For East/Southern African countries (Kenya, Tanzania, Uganda, Rwanda, Zambia, Zimbabwe,
-  Botswana, South Africa), prefer British-accented voices -- these sound more natural and
-  trustworthy for English-speaking African audiences than American accents.
+  Botswana, South Africa) where British is historically common on air, British-accented voices
+  remain acceptable -- but still prefer African-tagged voices when available from the voice list.
 - For West African countries (Nigeria, Ghana), British or Neutral accents work well.
   Nigerian Pidgin English content works best with warm, expressive voices.
 - For Francophone Africa (Cameroon, Senegal, Congo DRC/Republic), select French-capable
-  voices. The multilingual_v2 model handles French with any voice.
+  voices when the script is French. The eleven_v3 / multilingual_v2 models handle French with any suitable voice.
+- CAMEROON SPECIFIC: Cameroon is bilingual (French + English + Pidgin). If the campaign language is
+  English, do NOT default to UK British — Cameroonian English is closer to West African / neutral
+  African English. Prefer warm, clear voices with Neutral or African character; British is optional
+  only if the brief explicitly asks for British English. If the language is French, use French-capable
+  voices (fr-FR or multilingual) and French-appropriate pacing.
 - For Swahili-speaking markets, British-accented voices + multilingual_v2 model produce
   excellent Swahili pronunciation.
 - For any local African language (Yoruba, Igbo, Hausa, Twi, Zulu, Xhosa, Shona, Luganda,
@@ -164,32 +175,77 @@ class VoiceSelectorAgent(BaseAgent):
     description = "Selects and configures the best ElevenLabs voice for the campaign"
 
     async def _fetch_available_voices(self) -> list[dict[str, Any]]:
-        """Fetch all available voices from ElevenLabs (VoiceLab + premade)."""
-        logger.info(f"[{self.name}] Fetching available voices from ElevenLabs")
+        """Fetch all available voices from ElevenLabs. On 401 (invalid key) return curated list and do not raise."""
+        if not ELEVENLABS_API_KEY or len(ELEVENLABS_API_KEY) < 10:
+            logger.info(
+                "[%s] No valid ElevenLabs API key — using curated voice list (audio will use Edge TTS if ElevenLabs selected)",
+                self.name,
+            )
+            return list(_CURATED_ELEVENLABS_VOICES)
 
+        logger.info("[%s] Fetching available voices from ElevenLabs", self.name)
         all_voices: list[dict[str, Any]] = []
-        async with httpx.AsyncClient() as client:
-            # Fetch VoiceLab + premade voices (paginated)
-            next_cursor: str | None = ""
-            while next_cursor is not None:
+        try:
+            async with httpx.AsyncClient() as client:
                 params: dict[str, Any] = {"page_size": 100}
-                if next_cursor:
-                    params["next_cursor"] = next_cursor
                 response = await client.get(
                     f"{ELEVENLABS_BASE_URL}/v2/voices",
-                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    headers=get_elevenlabs_headers(),
                     params=params,
                     timeout=30.0,
                 )
+                if response.status_code == 401:
+                    if elevenlabs_401_is_tts_only(response.text):
+                        logger.info(
+                            "[%s] ElevenLabs key is TTS-only (no voices_read). Using curated default voices.",
+                            self.name,
+                        )
+                    else:
+                        logger.info(
+                            "[%s] ElevenLabs API key rejected (401). Using curated voice list — Edge TTS fallback if needed.",
+                            self.name,
+                        )
+                    return list(_CURATED_ELEVENLABS_VOICES)
                 response.raise_for_status()
                 data = response.json()
                 all_voices.extend(data.get("voices", []))
                 next_cursor = data.get("next_cursor") or None
-                if len(all_voices) >= 300:
-                    break
+                while next_cursor and len(all_voices) < 300:
+                    params = {"page_size": 100, "next_cursor": next_cursor}
+                    response = await client.get(
+                        f"{ELEVENLABS_BASE_URL}/v2/voices",
+                        headers=get_elevenlabs_headers(),
+                        params=params,
+                        timeout=30.0,
+                    )
+                    if response.status_code == 401:
+                        break
+                    response.raise_for_status()
+                    data = response.json()
+                    all_voices.extend(data.get("voices", []))
+                    next_cursor = data.get("next_cursor") or None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                if elevenlabs_401_is_tts_only(e.response.text):
+                    logger.info(
+                        "[%s] ElevenLabs key is TTS-only (no voices_read). Using curated default voices.",
+                        self.name,
+                    )
+                else:
+                    logger.info(
+                        "[%s] ElevenLabs API key invalid (401). Using curated voice list — Edge TTS fallback if needed.",
+                        self.name,
+                    )
+                return list(_CURATED_ELEVENLABS_VOICES)
+            raise
+        except Exception as e:
+            logger.warning("[%s] Could not fetch ElevenLabs voices: %s — using curated list", self.name, e)
+            return list(_CURATED_ELEVENLABS_VOICES)
 
-        logger.info(f"[{self.name}] Found {len(all_voices)} available voices")
+        if not all_voices:
+            return list(_CURATED_ELEVENLABS_VOICES)
 
+        logger.info("[%s] Found %s available voices from API", self.name, len(all_voices))
         simplified = []
         for v in all_voices:
             simplified.append({
@@ -223,12 +279,12 @@ class VoiceSelectorAgent(BaseAgent):
         """
         logger.info(f"[{self.name}] Selecting voice for {country}")
 
-        # Fetch available voices from ElevenLabs
+        # Fetch available voices (or curated list on 401 / no key)
         try:
             available_voices = await self._fetch_available_voices()
         except Exception as e:
-            logger.warning(f"[{self.name}] Could not fetch voices from API: {e}")
-            available_voices = _CURATED_ELEVENLABS_VOICES
+            logger.warning("[%s] Could not fetch voices: %s — using curated list", self.name, e)
+            available_voices = list(_CURATED_ELEVENLABS_VOICES)
 
         # Determine language from scripts or market analysis
         if not language:

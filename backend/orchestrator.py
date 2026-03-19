@@ -68,6 +68,7 @@ class PipelineOrchestrator:
         language: str | None = None,
         tts_engine: str | None = None,
         force_reanalyze: bool = False,
+        flow_config: dict[str, Any] | None = None,
         get_step_overrides: Callable[[], dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Execute the full pipeline.
@@ -78,6 +79,7 @@ class PipelineOrchestrator:
             telco: Telco operator name.
             language: Optional target language override.
             force_reanalyze: If True, skip cache and re-run analysis.
+            flow_config: Optional { "steps": [ { "id", "purpose", "max_words" }, ... ] } for per-step scripts/audio.
             get_step_overrides: Callable returning current step overrides dict
                 (e.g. {"EvalPanel": "skip"}). Read live so user can skip
                 steps while the pipeline is running.
@@ -88,6 +90,8 @@ class PipelineOrchestrator:
         _overrides = get_step_overrides or (lambda: {})
         session_id = str(uuid.uuid4())[:8]
         results: dict[str, Any] = {"session_id": session_id}
+        if flow_config:
+            results["flow_config"] = flow_config
 
         # Truncate oversized product text to avoid token limits
         original_len = len(product_text)
@@ -102,9 +106,18 @@ class PipelineOrchestrator:
             pipeline_start = time.monotonic()
 
             # ── Steps 1 & 2: Product Analysis + Market Research ──
-            cached = None if force_reanalyze else get_cached_analysis(
-                product_text, country, telco, language,
-            )
+            # Emit first progress immediately so the UI never sits at 0% while
+            # sync Supabase cache lookups block the event loop.
+            await self.on_progress("ProductAnalyzer", "started", {
+                "message": "Checking analysis cache…",
+            })
+            if force_reanalyze:
+                cached = None
+            else:
+                # Run sync Supabase calls in a thread so WS/polling stay responsive
+                cached = await asyncio.to_thread(
+                    get_cached_analysis, product_text, country, telco, language
+                )
 
             match_type = cached.get("match_type") if cached else None
 
@@ -213,6 +226,7 @@ class PipelineOrchestrator:
                 product_brief=product_brief,
                 market_analysis=market_analysis,
                 language_override=language,
+                flow_config=flow_config,
             )
             results["initial_scripts"] = scripts
             await self.on_progress("ScriptWriter", "completed", {
@@ -229,7 +243,10 @@ class PipelineOrchestrator:
 
             skip_eval = _overrides().get("EvalPanel") == "skip" or eval_rounds == 0
             if skip_eval:
-                reason = "skipped by user" if _overrides().get("EvalPanel") == "skip" else "eval rounds set to 0"
+                reason = (
+                    "skipped by user" if _overrides().get("EvalPanel") == "skip"
+                    else "eval rounds set to 0"
+                )
                 await self.on_progress("EvalPanel", "skipped", {
                     "message": f"Evaluation skipped ({reason})",
                 })
@@ -278,6 +295,7 @@ class PipelineOrchestrator:
                         feedback=evaluation,
                         previous_scripts=final_scripts,
                         language_override=language,
+                        flow_config=flow_config,
                     )
                     results[f"revised_scripts_round_{round_num + 1}"] = final_scripts
                     await self.on_progress("ScriptWriter_Revision", "completed", {
@@ -312,21 +330,32 @@ class PipelineOrchestrator:
                 "message": "Generating hook audio previews (3 voices)..."
             })
             try:
-                hook_result = await self.audio_producer.run_hook_previews(
-                    scripts=final_scripts,
-                    voice_selection=voice_selection,
-                    session_id=session_id,
-                    country=country,
-                    language=language,
-                    tts_engine_override=tts_engine,
+                # Cap wait so UI never spins forever if TTS/storage hangs
+                _HOOK_PREVIEW_TIMEOUT = 600.0
+                hook_result = await asyncio.wait_for(
+                    self.audio_producer.run_hook_previews(
+                        scripts=final_scripts,
+                        voice_selection=voice_selection,
+                        session_id=session_id,
+                        country=country,
+                        language=language,
+                        tts_engine_override=tts_engine,
+                    ),
+                    timeout=_HOOK_PREVIEW_TIMEOUT,
                 )
                 results["hook_previews"] = hook_result
                 engine = hook_result.get("tts_engine", "unknown")
                 engine_label = {"murf": "Murf AI", "elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
                 preview_count = hook_result.get("summary", {}).get("total_generated", 0)
                 await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Generated {preview_count} hook previews via {engine_label}",
+                    "message": f"Generated {preview_count} hook previews via {engine_label}. Choose voices (2F + 1M per variant) and BGM, then generate final audio.",
                     "data": {"summary": hook_result.get("summary", {}), "tts_engine": engine, "tts_engine_label": engine_label},
+                })
+                # Pipeline stops here. User chooses voices from hook previews and BGM, then clicks "Generate Full Audio" (Phase 2).
+            except asyncio.TimeoutError:
+                logger.error("Hook preview generation timed out — scripts still available")
+                await self.on_progress("AudioProducer", "completed", {
+                    "message": "Hook previews timed out (TTS took too long). Scripts are still available — try again or use Script to Voice.",
                 })
             except Exception as audio_err:
                 logger.error(f"Hook preview generation failed: {audio_err}")
@@ -336,9 +365,14 @@ class PipelineOrchestrator:
 
             # ── Pipeline Complete ──
             total_time = time.monotonic() - pipeline_start
-            logger.info(f"Pipeline completed in {total_time:.1f}s")
+            has_audio = bool(results.get("audio", {}).get("summary", {}).get("total_generated", 0))
+            logger.info(f"Pipeline completed in {total_time:.1f}s (audio={'yes' if has_audio else 'no'})")
+            done_msg = (
+                "Scripts and audio are ready." if has_audio
+                else "Scripts and hook previews are ready. Choose voices (2F + 1M per variant) and BGM, then click Generate Full Audio."
+            )
             await self.on_progress("Pipeline", "completed", {
-                "message": f"Pipeline complete in {total_time:.0f}s! Scripts and voice recommendation are ready.",
+                "message": f"Pipeline complete in {total_time:.0f}s! {done_msg}",
                 "session_id": session_id,
             })
 
@@ -362,6 +396,7 @@ class PipelineOrchestrator:
         language: str | None = None,
         tts_engine: str | None = None,
         bgm_style: str = "upbeat",
+        prebuilt_engine_ctx: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Phase 2: generate full audio with user-chosen voices and BGM style."""
         await self.on_progress("AudioProducer", "started", {
@@ -377,6 +412,7 @@ class PipelineOrchestrator:
                 language=language,
                 tts_engine_override=tts_engine,
                 bgm_style=bgm_style,
+                prebuilt_engine_ctx=prebuilt_engine_ctx,
             )
             engine = audio_result.get("tts_engine", "unknown")
             engine_label = {"murf": "Murf AI", "elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)

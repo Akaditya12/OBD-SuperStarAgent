@@ -27,7 +27,7 @@ import ProductUpload from "@/components/ProductUpload";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
 import PipelineProgress from "@/components/PipelineProgress";
 import type { ProgressStep } from "@/components/PipelineProgress";
-import ProductPresets, { BNG_PRODUCTS } from "@/components/ProductPresets";
+import ProductPresets, { getFallbackPresets, mapApiPresetToProductPreset } from "@/components/ProductPresets";
 import type { ProductPreset } from "@/components/ProductPresets";
 import PromotionTypeSelect, { PROMOTION_TYPES } from "@/components/PromotionTypeSelect";
 import type { PromotionType } from "@/components/PromotionTypeSelect";
@@ -41,7 +41,7 @@ import type {
   HookPreviewResult,
   AudioResult,
 } from "@/lib/types";
-import { Database, Languages, Music, Radio, Upload, VolumeX } from "lucide-react";
+import { Database, GitBranch, Languages, Music, Radio, Upload, VolumeX } from "lucide-react";
 import { forceDownload } from "@/lib/utils";
 
 type WizardStep = "input" | "running" | "results";
@@ -78,8 +78,10 @@ function HomePageContent() {
   const [username, setUsername] = useState("user");
 
   // Form
-  const [selectedProduct, setSelectedProduct] = useState("eva");
-  const [productText, setProductText] = useState(BNG_PRODUCTS[0].fullDescription);
+  const [selectedProduct, setSelectedProduct] = useState("ai-personal-assistant");
+  const [presets, setPresets] = useState<ProductPreset[] | null>(null);
+  const effectivePresets = presets ?? getFallbackPresets();
+  const [productText, setProductText] = useState(() => getFallbackPresets()[0]?.fullDescription ?? "");
   const [fileName, setFileName] = useState("");
   const [country, setCountry] = useState("");
   const [telco, setTelco] = useState("");
@@ -93,11 +95,26 @@ function HomePageContent() {
   } | null>(null);
   const cacheCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Fetch product presets from API (DB-backed when Supabase is configured)
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/product-presets")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to fetch"))))
+      .then((data: { presets?: Array<{ id: string; name: string; icon: string; shortDesc: string; fullDescription: string; category: string }> }) => {
+        if (cancelled || !data.presets?.length) return;
+        setPresets(data.presets.map(mapApiPresetToProductPreset));
+      })
+      .catch(() => {
+        if (!cancelled) setPresets(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   // Handle ?product= URL param from sidebar clicks
   useEffect(() => {
     const productParam = searchParams.get("product");
-    if (productParam) {
-      const found = BNG_PRODUCTS.find((p) => p.id === productParam);
+    if (productParam && effectivePresets.length) {
+      const found = effectivePresets.find((p) => p.id === productParam);
       if (found && found.id !== "custom") {
         setSelectedProduct(found.id);
         setProductText(found.fullDescription);
@@ -105,7 +122,15 @@ function HomePageContent() {
         setWizardStep("input");
       }
     }
-  }, [searchParams]);
+  }, [searchParams, effectivePresets]);
+
+  // Keep product description editor in sync with preset from API/Supabase when presets load or change
+  // (e.g. after editing product_presets in Supabase or refetch) so the full editor shows latest content
+  useEffect(() => {
+    if (selectedProduct === "custom") return;
+    const preset = effectivePresets.find((p) => p.id === selectedProduct);
+    if (preset?.fullDescription != null) setProductText(preset.fullDescription);
+  }, [effectivePresets, selectedProduct]);
 
   // Wizard -- restore from sessionStorage if user navigated away mid-session
   const [wizardStep, setWizardStep] = useState<WizardStep>(() => {
@@ -170,8 +195,31 @@ function HomePageContent() {
   const [customBgmName, setCustomBgmName] = useState<string>("");
   const [uploadingBgm, setUploadingBgm] = useState(false);
 
+  // Flow config (optional): account/service flow for multi-step scripts & audio
+  const [flowConfigs, setFlowConfigs] = useState<{ id: string; account_key: string; service_key: string; display_name: string; steps: unknown[] }[]>([]);
+  const [flowConfigId, setFlowConfigId] = useState<string>("");
+
   // WebSocket ref
   const wsRef = useRef<WebSocket | null>(null);
+
+  // ── Fetch flow configs for selected account/telco (when country/telco changes, filter by telco) ──
+  useEffect(() => {
+    if (!telco?.trim()) {
+      setFlowConfigs([]);
+      setFlowConfigId("");
+      return;
+    }
+    const params = new URLSearchParams({ telco: telco.trim() });
+    fetch(`/api/flow-configs?${params}`)
+      .then((res) => res.ok ? res.json() : { flowConfigs: [] })
+      .then((data) => {
+        const list = Array.isArray(data.flowConfigs) ? data.flowConfigs : [];
+        setFlowConfigs(list);
+        const currentExists = list.some((fc: { id: string }) => fc.id === flowConfigId);
+        if (!currentExists && flowConfigId) setFlowConfigId("");
+      })
+      .catch(() => setFlowConfigs([]));
+  }, [telco]);
 
   // ── Auth Check ──
   useEffect(() => {
@@ -388,6 +436,7 @@ function HomePageContent() {
           language: language || undefined,
           tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
           force_reanalyze: forceReanalyze,
+          flow_config_id: flowConfigId || undefined,
         }),
       });
 
@@ -408,6 +457,21 @@ function HomePageContent() {
       toast("error", "Network error");
     }
   };
+
+  // ── Go back from running (when pipeline is stuck or user cancels) ──
+  const handleGoBackFromRunning = useCallback(() => {
+    localStorage.removeItem("obd_active_session");
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setProgressSteps(
+      PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
+    );
+    setWizardStep("input");
+    setError("");
+    toast("info", "Returned to setup. You can change options and run again.");
+  }, []);
 
   // ── Save campaign ──
   const handleSaveCampaign = async () => {
@@ -482,12 +546,12 @@ function HomePageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, source_language: script.language }),
       });
-      if (!res.ok) throw new Error("Translation failed");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Translation failed");
       setTranslations((prev) => ({ ...prev, [vid]: data.translated }));
       setShowTranslation((prev) => ({ ...prev, [vid]: true }));
-    } catch {
-      toast("error", "Translation failed. Please try again.");
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "Translation failed. Please try again.");
     } finally {
       setTranslatingVariant(null);
     }
@@ -703,8 +767,8 @@ function HomePageContent() {
     setError("");
 
     // Form defaults
-    setSelectedProduct("eva");
-    setProductText(BNG_PRODUCTS[0].fullDescription);
+    setSelectedProduct("ai-personal-assistant");
+    setProductText(effectivePresets[0]?.fullDescription ?? "");
     setFileName("");
     setCountry("");
     setTelco("");
@@ -727,6 +791,7 @@ function HomePageContent() {
     setCustomBgmId("");
     setCustomBgmName("");
     setUploadingBgm(false);
+    setFlowConfigId("");
     if (bgmAudioRef.current) bgmAudioRef.current.pause();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setPlayingAudio(null);
@@ -855,6 +920,7 @@ function HomePageContent() {
             <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
               <ProductPresets
                 selectedProduct={selectedProduct}
+                presets={presets}
                 onSelect={(product: ProductPreset) => {
                   setSelectedProduct(product.id);
                   if (product.id !== "custom" && product.fullDescription) {
@@ -910,6 +976,39 @@ function HomePageContent() {
                 onLanguageChange={setLanguage}
               />
             </div>
+
+            {/* Flow config (optional): multi-step scripts & audio per account; filtered by selected telco */}
+            {telco && (
+              <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
+                <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-3">
+                  <GitBranch className="w-4 h-4 text-[var(--accent)]" />
+                  Account flow (optional)
+                </label>
+                {flowConfigs.length > 0 ? (
+                  <>
+                    <select
+                      value={flowConfigId}
+                      onChange={(e) => setFlowConfigId(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--input-bg)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/50"
+                    >
+                      <option value="">No flow — single script (as usual)</option>
+                      {flowConfigs.map((fc) => (
+                        <option key={fc.id} value={fc.id}>
+                          {fc.display_name} ({fc.account_key} / {fc.service_key})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-[var(--text-tertiary)] mt-1.5">
+                      Choose a saved flow for multi-step scripts and per-step audio, or leave as single script.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-[var(--text-tertiary)] py-1">
+                    No flow configured for this account and country yet. Run as usual with single script, or add a flow in Admin for <strong>{telco}</strong>.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* TTS Engine */}
             <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
@@ -1061,6 +1160,18 @@ function HomePageContent() {
               }
             }}
           />
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={handleGoBackFromRunning}
+              className="px-4 py-2 rounded-xl text-sm font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card)] hover:border-[var(--card-border-hover)] transition-colors"
+            >
+              Go back to setup
+            </button>
+            <p className="text-[10px] text-[var(--text-tertiary)] text-center max-w-sm">
+              If the pipeline is stuck, use this to return to the form. You can change options and run again, or restart the backend if needed.
+            </p>
+          </div>
         </div>
       )}
 

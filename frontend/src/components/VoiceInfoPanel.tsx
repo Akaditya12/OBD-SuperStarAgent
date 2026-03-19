@@ -69,16 +69,29 @@ function getVoiceRationale(
   voiceIdx: number,
   voiceSelection: VoiceSelection,
   voicePool: { voice_label: string; voice_index: number; el_voice_id?: string }[],
+  actualEngine?: string,
 ): string {
   const selectedVoice = voiceSelection?.selected_voice;
   const alternatives = voiceSelection?.alternative_voices || [];
   const poolVoice = voicePool[voiceIdx];
   const voiceName = poolVoice?.voice_label || selectedVoice?.name || "Voice";
   const poolVoiceId = poolVoice?.el_voice_id || "";
+  const selectedName = (selectedVoice?.name || "").trim().toLowerCase();
+  const poolNameClean = voiceName.replace(/\s*\(.*\)/, "").trim().toLowerCase();
 
   if (voiceIdx === 0) {
-    const rationale = voiceSelection?.rationale || "";
-    if (rationale) return rationale;
+    // Only show LLM rationale (e.g. "Dorothy for Ghana") when the actual voice matches
+    // the Voice Selector's choice. For Murf/Edge the pool has different names (Arohi, Esi, etc.).
+    const nameMatches = selectedName && poolNameClean && (selectedName.includes(poolNameClean) || poolNameClean.includes(selectedName));
+    const isElevenLabs = actualEngine === "elevenlabs";
+    if (voiceSelection?.rationale && (isElevenLabs || nameMatches)) {
+      return voiceSelection.rationale;
+    }
+    const engineLabel = actualEngine === "murf" ? "Murf AI" : actualEngine === "edge-tts" ? "Edge TTS" : "";
+    if (engineLabel) {
+      const gender = (poolVoice?.voice_label || "").toLowerCase().includes("female") ? "Female" : (poolVoice?.voice_label || "").toLowerCase().includes("male") ? "Male" : "";
+      return `${voiceName} — regional voice from the ${engineLabel} pool for this market.${gender ? ` ${gender} voice.` : ""}`.trim();
+    }
     const desc = selectedVoice?.description || "";
     const accent = selectedVoice?.accent ? `${selectedVoice.accent}-accented` : "";
     const gender = selectedVoice?.gender || "";
@@ -133,7 +146,7 @@ export default function VoiceInfoPanel({
   const modelId = voiceSelection?.elevenlabs_api_params?.model_id || "";
   const voiceId = currentPoolVoice?.el_voice_id || selectedVoice?.voice_id || "";
 
-  const rationale = getVoiceRationale(activeVoiceIdx, voiceSelection, voicePool);
+  const rationale = getVoiceRationale(activeVoiceIdx, voiceSelection, voicePool, actualEngine);
 
   const genderLabel = (() => {
     if (activeVoiceIdx === 0) return selectedVoice?.gender || "";

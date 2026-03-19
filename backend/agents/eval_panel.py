@@ -138,15 +138,23 @@ class EvalPanelAgent(BaseAgent):
         Returns:
             Evaluation results with scores, feedback, and revision instructions.
         """
-        logger.info(f"[{self.name}] Evaluating {len(scripts.get('scripts', []))} script variants")
+        script_list = scripts.get("scripts", [])
+        logger.info(f"[{self.name}] Evaluating {len(script_list)} script variants")
 
         # Build a concise context
         product_name = product_brief.get("product_name", "Unknown")
         country = market_analysis.get("country", "Unknown")
         telco = market_analysis.get("telco", "Unknown")
 
+        is_flow = bool(script_list and len(script_list[0].get("segments") or []) > 0)
+        flow_note = (
+            " These are flow-based scripts: each variant has multiple segments (e.g. welcome, pack details, thanks). "
+            "Evaluate overall quality per variant and clarity of each step; suggest improvements that keep the flow structure."
+            if is_flow else ""
+        )
+
         user_prompt = f"""\
-Evaluate these OBD scripts for {product_name} in {country} ({telco}).
+Evaluate these OBD scripts for {product_name} in {country} ({telco}).{flow_note}
 
 SCRIPTS:
 {json.dumps(scripts, indent=2)}

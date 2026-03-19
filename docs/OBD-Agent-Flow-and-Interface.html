@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OBD SuperStar Agent — Product &amp; Agents</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      line-height: 1.5;
+      color: #111;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 2.5rem;
+    }
+    h1 { font-size: 1.55rem; margin-bottom: 0.35rem; }
+    .brand { color: #555; font-size: 0.9rem; margin-bottom: 1.75rem; }
+    h2 { font-size: 1.15rem; margin-top: 1.85rem; margin-bottom: 0.6rem; border-bottom: 2px solid #e8e8e8; padding-bottom: 0.35rem; }
+    h3 { font-size: 1rem; margin-top: 1.15rem; margin-bottom: 0.4rem; }
+    p { margin: 0.5rem 0; }
+    .lead { font-size: 1.02rem; color: #222; }
+    table.agents { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 0.75rem 0 1rem; }
+    table.agents th, table.agents td { border: 1px solid #ddd; padding: 0.5rem 0.6rem; text-align: left; vertical-align: top; }
+    table.agents th { background: #f4f4f4; width: 22%; }
+    table.agents td:first-child { font-weight: 600; white-space: nowrap; }
+    ul { margin: 0.4rem 0; padding-left: 1.2rem; }
+    li { margin: 0.25rem 0; }
+    .box { background: #f9fafb; border: 1px solid #eee; border-radius: 8px; padding: 0.85rem 1rem; margin: 0.85rem 0; font-size: 0.9rem; }
+    @media print {
+      body { padding: 1rem; max-width: none; }
+      h2 { page-break-after: avoid; }
+      table.agents { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>OBD SuperStar Agent</h1>
+  <p class="brand">blackNgreen · Product overview &amp; agent system</p>
+
+  <h2>What this product is</h2>
+  <p class="lead">
+    <strong>OBD SuperStar Agent</strong> is an AI application for telecom and VAS teams who need
+    <strong>outbound dialer (OBD)</strong> campaigns: short, persuasive call scripts and
+    <strong>ready-to-play audio</strong> in the right language and regional style.
+  </p>
+  <p>
+    You provide a <strong>product description</strong> (or paste a script) and choose <strong>country</strong>,
+    <strong>operator</strong>, and <strong>language</strong>. The system runs a chain of specialised AI agents
+    that analyse the product, research the market, write and critique scripts, choose a voice, and
+    produce mixed audio (voice + optional background music).
+  </p>
+  <p><strong>What you get at the end:</strong></p>
+  <ul>
+    <li>Multiple script variants (hook, body, CTA, fallbacks) tuned to the market.</li>
+    <li>Audio files you can download and use on your OBD platform.</li>
+    <li>Optional save to a dashboard for later access and handover.</li>
+  </ul>
+
+  <h2>The six agents (main pipeline)</h2>
+  <p>
+    Each agent is a dedicated step. Together they form one pipeline from raw product input to final audio.
+    The next agent always uses the output of the previous steps.
+  </p>
+
+  <table class="agents">
+    <tr>
+      <th>Agent</th>
+      <th>Role</th>
+      <th>Input → Output</th>
+    </tr>
+    <tr>
+      <td>1. Product Analyzer</td>
+      <td>Turns unstructured product material into a clear brief.</td>
+      <td><strong>In:</strong> Product document (PDF/text). <strong>Out:</strong> Structured brief—features, benefits, pricing hooks, subscription/IVR angles—so later agents do not guess.</td>
+    </tr>
+    <tr>
+      <td>2. Market Researcher</td>
+      <td>Builds a market picture for the chosen country and telco.</td>
+      <td><strong>In:</strong> Brief + country + telco. <strong>Out:</strong> Audience traits, cultural notes, tone guidance, and promotion ideas so scripts sound local and relevant.</td>
+    </tr>
+    <tr>
+      <td>3. Script Writer</td>
+      <td>Writes the actual OBD scripts in the required language and length.</td>
+      <td><strong>In:</strong> Brief + market analysis + language choice. <strong>Out:</strong> Several variants, each with hook (~5s), body (~18s), CTA with clear DTMF, fallbacks, and polite close—formatted for TTS (tags stripped before speech).</td>
+    </tr>
+    <tr>
+      <td>4. Eval Panel</td>
+      <td>Quality-checks scripts before audio is produced.</td>
+      <td><strong>In:</strong> Script variants. <strong>Out:</strong> Scores and written feedback from multiple “personas” (e.g. clarity, cultural fit, CTA strength). Feeds back into revision if you use that loop.</td>
+    </tr>
+    <tr>
+      <td>3 again — Revision</td>
+      <td>Rewrites scripts using eval feedback.</td>
+      <td><strong>In:</strong> Original scripts + eval feedback. <strong>Out:</strong> Revised variants that keep the same structure but address weaknesses flagged by the panel.</td>
+    </tr>
+    <tr>
+      <td>5. Voice Selector</td>
+      <td>Chooses which voice fits the market and script tone.</td>
+      <td><strong>In:</strong> Scripts + market context + available voices. <strong>Out:</strong> Primary voice plus alternatives, with rationale—so audio matches region and campaign style.</td>
+    </tr>
+    <tr>
+      <td>6. Audio Producer</td>
+      <td>Generates speech and mixes it for broadcast use.</td>
+      <td><strong>In:</strong> Final script text + chosen voice + country (for accent/voice pool) + BGM choice. <strong>Out:</strong> MP3 (or WAV) files—hook previews first, then full mixed audio via TTS (ElevenLabs preferred, then Murf, then free edge-tts) plus optional background music.</td>
+    </tr>
+  </table>
+
+  <div class="box">
+    <strong>Script to Voice (separate mode):</strong> If you already have a script, you do not need agents 1–5.
+    You paste the text and only <strong>Agent 6 (Audio Producer)</strong> runs—same TTS stack, country-based voices,
+    speed control, and optional “lock voice” so the next script uses the same voice without picking again.
+  </div>
+
+  <h2>How the interface maps to the pipeline</h2>
+  <p>
+    The <strong>home page</strong> is the campaign wizard: upload product file, set country/telco/language, then start.
+    Progress is shown step by step; when analysis for the same market was saved before, the app can offer to
+    reuse it and skip earlier agents.
+  </p>
+  <p>
+    When the pipeline finishes, the <strong>results screen</strong> shows script variants, lets you edit or translate,
+    play short previews per voice, pick a voice, and generate full audio—then save the campaign to the
+    <strong>dashboard</strong> for your team.
+  </p>
+  <p>
+    <strong>Script to Voice</strong> is a separate page: paste script → preview voices → generate final file →
+    download or save—ideal when the script is already written and you only need consistent audio.
+  </p>
+
+  <p style="margin-top:2rem; font-size:0.82rem; color:#777;">
+    OBD SuperStar Agent · blackNgreen
+  </p>
+
+</body>
+</html>

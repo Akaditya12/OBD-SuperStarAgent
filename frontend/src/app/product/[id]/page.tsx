@@ -24,10 +24,12 @@ import {
   Cross,
   GraduationCap,
 } from "lucide-react";
-import { BNG_PRODUCTS } from "@/components/ProductPresets";
+import { getFallbackPresets, mapApiPresetToProductPreset } from "@/components/ProductPresets";
+import type { ProductPreset } from "@/components/ProductPresets";
 
 const ICON_MAP: Record<string, React.ReactNode> = {
-  eva: <Sparkles className="w-6 h-6" />,
+  "ai-personal-assistant": <Sparkles className="w-6 h-6" />,
+  eva: <Sparkles className="w-6 h-6" />, // legacy redirect
   smartconnect: <Radio className="w-6 h-6" />,
   callsignature: <Shield className="w-6 h-6" />,
   magicvoice: <Mic2 className="w-6 h-6" />,
@@ -48,13 +50,14 @@ interface FlowStep {
 }
 
 const PRODUCT_FLOWS: Record<string, FlowStep[]> = {
-  eva: [
+  "ai-personal-assistant": [
     { step: 1, title: "Caller Dials Subscriber", description: "Someone calls the subscriber's number" },
     { step: 2, title: "Subscriber is Busy/Unavailable", description: "Call cannot be answered directly" },
-    { step: 3, title: "Call Forwards to EVA", description: "EVA picks up and greets the caller naturally" },
-    { step: 4, title: "EVA Handles the Call", description: "Takes messages, schedules callbacks, provides info" },
+    { step: 3, title: "Call Forwards to AI Personal Assistant", description: "AI personal assistant picks up and greets the caller naturally" },
+    { step: 4, title: "AI Personal Assistant Handles the Call", description: "Takes messages, schedules callbacks, provides info" },
     { step: 5, title: "Summary Sent", description: "Subscriber gets call summary via WhatsApp/SMS/Email" },
   ],
+  eva: [], // legacy; use ai-personal-assistant
   smartconnect: [
     { step: 1, title: "Subscriber Has Low/Zero Balance", description: "User tries to make a call but has insufficient balance" },
     { step: 2, title: "Routed to SmartConnect", description: "Instead of 'insufficient balance' tone, call routes to platform" },
@@ -128,12 +131,13 @@ const PRODUCT_FLOWS: Record<string, FlowStep[]> = {
 };
 
 const PRODUCT_STATS: Record<string, { label: string; value: string; icon: React.ReactNode }[]> = {
-  eva: [
+  "ai-personal-assistant": [
     { label: "Languages", value: "95+", icon: <Globe className="w-4 h-4" /> },
     { label: "Deploy Time", value: "4-6 weeks", icon: <Zap className="w-4 h-4" /> },
     { label: "ARPU Uplift", value: "$0.30-$3", icon: <DollarSign className="w-4 h-4" /> },
     { label: "Penetration", value: "5-8%", icon: <Users className="w-4 h-4" /> },
   ],
+  eva: [], // legacy; use ai-personal-assistant
   smartconnect: [
     { label: "Daily Traffic", value: "8-9M calls", icon: <TrendingUp className="w-4 h-4" /> },
     { label: "Revenue Uplift", value: "5%", icon: <DollarSign className="w-4 h-4" /> },
@@ -196,11 +200,24 @@ const PRODUCT_STATS: Record<string, { label: string; value: string; icon: React.
   ],
 };
 
+const LEGACY_EVA_ID = "eva";
+const CANONICAL_AI_ASSISTANT_ID = "ai-personal-assistant";
+
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const productId = params.id as string;
   const [authChecked, setAuthChecked] = useState(false);
+
+  // Redirect old URL /product/eva to /product/ai-personal-assistant
+  useEffect(() => {
+    if (productId === LEGACY_EVA_ID) {
+      router.replace(`/product/${CANONICAL_AI_ASSISTANT_ID}`);
+    }
+  }, [productId, router]);
+
+  const [product, setProduct] = useState<ProductPreset | null>(null);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -209,7 +226,32 @@ export default function ProductDetailPage() {
       .catch(() => router.push("/login"));
   }, [router]);
 
-  const product = BNG_PRODUCTS.find((p) => p.id === productId);
+  useEffect(() => {
+    let cancelled = false;
+    const fallbackList = getFallbackPresets();
+    fetch("/api/product-presets")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((data: { presets?: Array<{ id: string; name: string; icon: string; shortDesc: string; fullDescription: string; category: string }> }) => {
+        if (cancelled) return;
+        const apiList = data.presets?.length ? data.presets.map(mapApiPresetToProductPreset) : [];
+        let productFromApi = apiList.find((p) => p.id === productId);
+        if (!productFromApi && productId === "ai-personal-assistant") {
+          productFromApi = apiList.find((p) => p.id === "Personal Assistant" || p.id === "personal assistant" || p.id === "AI personal assistant");
+        }
+        const productFromFallback = fallbackList.find((p) => p.id === productId);
+        setProduct(productFromApi ?? productFromFallback ?? null);
+        setPresetsLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProduct(fallbackList.find((p) => p.id === productId) ?? null);
+          setPresetsLoaded(true);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [productId]);
+
+  const productResolved = productId === "custom" ? null : product;
 
   if (!authChecked) {
     return (
@@ -219,15 +261,42 @@ export default function ProductDetailPage() {
     );
   }
 
-  if (!product || productId === "custom") {
+  if (productId === LEGACY_EVA_ID) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <p className="text-[var(--text-tertiary)]">Product not found</p>
-          <Link href="/" className="text-[var(--accent)] hover:underline text-sm">
-            Go back home
-          </Link>
+        <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!presetsLoaded || !productResolved) {
+    if (presetsLoaded && productId !== "custom" && !productResolved) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <p className="text-[var(--text-tertiary)]">Product not found</p>
+            <Link href="/" className="text-[var(--accent)] hover:underline text-sm">
+              Go back home
+            </Link>
+          </div>
         </div>
+      );
+    }
+    if (productId === "custom") {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <p className="text-[var(--text-tertiary)]">Product not found</p>
+            <Link href="/" className="text-[var(--accent)] hover:underline text-sm">
+              Go back home
+            </Link>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -236,7 +305,7 @@ export default function ProductDetailPage() {
   const stats = PRODUCT_STATS[productId] || [];
   const icon = ICON_MAP[productId];
 
-  const descSections = product.fullDescription.split("\n\n").filter(Boolean);
+  const descSections = productResolved.fullDescription.split("\n\n").filter(Boolean);
   const overview = descSections.find((s) => s.includes("Product Overview:"))?.replace("Product Overview:", "").trim() || "";
   const features = descSections.find((s) => s.includes("Key Features:"));
   const featureList = features
@@ -268,8 +337,8 @@ export default function ProductDetailPage() {
               {icon}
             </div>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold text-[var(--text-primary)]">{product.name}</h1>
-              <p className="text-sm text-[var(--text-tertiary)] mt-1">{product.shortDesc}</p>
+              <h1 className="text-2xl font-bold text-[var(--text-primary)]">{productResolved.name}</h1>
+              <p className="text-sm text-[var(--text-tertiary)] mt-1">{productResolved.shortDesc}</p>
             </div>
           </div>
 

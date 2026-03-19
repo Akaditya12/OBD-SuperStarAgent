@@ -33,12 +33,23 @@ from backend.config import (
     ELEVENLABS_TTS_MODEL,
     MURF_API_KEY,
     OUTPUTS_DIR,
+    get_elevenlabs_headers,
+    elevenlabs_401_is_tts_only,
 )
 from backend.database import supabase
 
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
+
+# Languages not supported by eleven_v3; use eleven_multilingual_v2 so ElevenLabs still works
+ELEVENLABS_V3_UNSUPPORTED_LANGUAGES = ("amharic",)
+
+# eleven_multilingual_v2 supports ~29 languages; others (e.g. sw, am) must not be sent as language_code
+ELEVENLABS_V2_SUPPORTED_LANG_CODES = frozenset({
+    "en", "de", "fr", "es", "it", "pt", "pl", "hi", "ja", "ko", "zh", "ar", "id", "nl", "tr",
+    "fil", "sv", "bg", "ro", "cs", "el", "fi", "hr", "ms", "sk", "da", "ta", "uk", "ru",
+})
 
 # Matches ANY [tag] with no length limit
 _ANY_BRACKET_TAG = re.compile(r"\[[^\]]+\]")
@@ -127,13 +138,26 @@ COUNTRY_LOCALE: dict[str, str] = {
     "Jamaica": "en-US", "Trinidad and Tobago": "en-US",
 }
 
-# Prosody per section type -- warm and clear with slight variation
+# Prosody per section type -- warm and clear with slight variation (emotions/expression by section)
 SECTION_PROSODY: dict[str, dict[str, str]] = {
     "main":      {"rate": "-3%",   "pitch": "+2Hz"},   # slightly slower = warmer
     "fallback1": {"rate": "+0%",   "pitch": "+3Hz"},   # a touch brighter for urgency
     "fallback2": {"rate": "-2%",   "pitch": "+1Hz"},   # calm, reassuring
     "closure":   {"rate": "-5%",   "pitch": "-1Hz"},   # gentle close
 }
+
+
+def _edge_rate_with_speed(section_type: str, speed: float) -> str:
+    """Combine section prosody rate with user speed for edge-tts (format +X% or -X%)."""
+    prosody = SECTION_PROSODY.get(section_type, {"rate": "+0%", "pitch": "+0Hz"})
+    rate_s = prosody["rate"].strip().rstrip("%").lstrip("+")
+    try:
+        base = int(rate_s)
+    except ValueError:
+        base = 0
+    delta = int((speed - 1.0) * 100)
+    pct = max(-50, min(50, base + delta))
+    return f"{pct:+d}%"
 
 
 # Technical acronyms that TTS should spell out letter by letter.
@@ -153,11 +177,14 @@ _PRONUNCIATION_FIXES: list[tuple[re.Pattern, str]] = [
 def _clean_text_for_tts(text: str, apply_pronunciation_hacks: bool = True) -> str:
     """Strip ALL bracket/direction tags and prepare text for TTS.
 
-    Aggressively removes every kind of tag the LLM might invent:
-    [square], 【fullwidth】, (parenthetical direction), {curly}, <xml>, and
-    standalone emotion words used as stage directions.
+    Converts action/emotion tags that can be spoken ([laughs], [sigh], [gasps],
+    [pause]) to natural speech or pacing; strips the rest. Section-based
+    prosody (rate/pitch per hook, body, fallback, closure) and engine-specific style
+    carry expression so the final audio reflects warmth, urgency, or calm by section.
+    Also removes [square], 【fullwidth】, (direction), {curly}, <xml>, and fixes
+    pronunciation (IVR, OBD, etc.) for non-Murf engines; Murf uses its own dictionary.
     """
-    # Step 1: Convert known tags to natural speech sounds
+    # Step 1: Convert known emotion/action tags to natural speech or pacing (so they show in the voice)
     text = re.sub(r"\[laughs?\]", "ha ha, ", text, flags=re.IGNORECASE)
     text = re.sub(r"\[lightlaugh\]", "heh, ", text, flags=re.IGNORECASE)
     text = re.sub(r"\[sigh\]", "hmm, ", text, flags=re.IGNORECASE)
@@ -405,6 +432,7 @@ MURF_VOICE_POOL: dict[str, list[tuple[str, str, str, str]]] = {
 def _get_edge_voice_pool(country: str, language: str | None) -> list[tuple[str, str]]:
     """Get 3 edge-tts voices for the given country/language."""
     locale = None
+    country_locale = COUNTRY_LOCALE.get(country)
     if language:
         lang_lower = language.lower().strip()
         if lang_lower in LANGUAGE_TO_LOCALE:
@@ -415,7 +443,7 @@ def _get_edge_voice_pool(country: str, language: str | None) -> list[tuple[str, 
                     locale = loc
                     break
     if not locale:
-        locale = COUNTRY_LOCALE.get(country, "en-US")
+        locale = country_locale or "en-US"
 
     if locale in EDGE_VOICE_POOL:
         return EDGE_VOICE_POOL[locale]
@@ -510,51 +538,21 @@ def _country_to_elevenlabs_lang_code(country: str, language: str | None) -> str 
     return country_map.get(c)
 
 
-def _get_accent_description(country: str) -> str:
-    """Return a short accent description for the country to guide eleven_v3.
-
-    ElevenLabs eleven_v3 can modulate accent when given regional text cues.
-    Returns empty string for default/western markets.
-    """
-    c = country.lower().strip()
-    _african = {
-        "zambia", "botswana", "kenya", "nigeria", "ghana", "south africa",
-        "tanzania", "uganda", "zimbabwe", "ethiopia", "malawi", "namibia",
-        "cameroon", "senegal", "rwanda", "mozambique", "madagascar",
-        "sierra leone", "liberia", "congo (drc)",
-    }
-    if c in _african:
-        return "African"
-    if c in {"india", "bangladesh", "sri lanka", "nepal", "pakistan"}:
-        return "South Asian"
-    if c in {"saudi arabia", "uae", "qatar", "oman", "bahrain", "kuwait",
-             "egypt", "jordan", "iraq", "lebanon", "morocco", "tunisia"}:
-        return "Middle Eastern"
-    if c in {"brazil", "mexico", "colombia", "argentina", "chile", "peru",
-             "venezuela", "ecuador"}:
-        return "Latin American"
-    if c in {"indonesia", "philippines", "malaysia", "thailand", "vietnam",
-             "singapore", "cambodia", "myanmar"}:
-        return "Southeast Asian"
-    return ""
-
-
 def _pick_edge_voice(country: str, language: str | None) -> str:
     """Pick the best edge-tts voice for the given country and language."""
+    locale = None
+    country_locale = COUNTRY_LOCALE.get(country)
     if language:
         lang_lower = language.lower().strip()
-        # Direct language name match (Hindi, Hinglish, Tamil, etc.)
         if lang_lower in LANGUAGE_TO_LOCALE:
             locale = LANGUAGE_TO_LOCALE[lang_lower]
-            if locale in EDGE_VOICE_MAP:
-                return EDGE_VOICE_MAP[locale]
-        # Try partial match (e.g. "Hindi/English mix" -> "hindi")
-        for lang_key, locale in LANGUAGE_TO_LOCALE.items():
-            if lang_key in lang_lower:
-                if locale in EDGE_VOICE_MAP:
-                    return EDGE_VOICE_MAP[locale]
-
-    locale = COUNTRY_LOCALE.get(country, "en-US")
+        else:
+            for lang_key, loc in LANGUAGE_TO_LOCALE.items():
+                if lang_key in lang_lower:
+                    locale = loc
+                    break
+    if not locale:
+        locale = country_locale or "en-US"
     return EDGE_VOICE_MAP.get(locale, "en-US-AriaNeural")
 
 
@@ -860,12 +858,26 @@ def _mix_voice_with_music(
             bitrate="320k",
             parameters=["-ac", "2", "-ar", "44100"],
         )
-        logger.info(f"Mixed with music: {output_path.name} ({output_path.stat().st_size / 1024:.1f} KB)")
+        logger.debug(f"Mixed with music: {output_path.name} ({output_path.stat().st_size / 1024:.1f} KB)")
     except Exception as e:
         logger.warning(f"Music mixing failed ({e}), using voice-only")
         if voice_path != output_path:
             import shutil
             shutil.copy2(voice_path, output_path)
+
+
+async def _mix_voice_with_music_async(
+    voice_path: Path,
+    output_path: Path,
+    bgm_style: str = "upbeat",
+    custom_bgm_path: Path | None = None,
+) -> None:
+    """Run BGM mixing in a thread so it doesn't block the event loop (avoids pipeline stuck)."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: _mix_voice_with_music(voice_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path),
+    )
 
 
 class AudioProducerAgent(BaseAgent):
@@ -882,11 +894,12 @@ class AudioProducerAgent(BaseAgent):
         )
 
     async def _check_elevenlabs_quota(self) -> bool:
+        """Return True if we can use ElevenLabs (quota OK or key may be TTS-only with no subscription read)."""
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     f"{ELEVENLABS_BASE_URL}/v1/user/subscription",
-                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    headers=get_elevenlabs_headers(),
                     timeout=10.0,
                 )
                 if resp.status_code == 200:
@@ -896,13 +909,40 @@ class AudioProducerAgent(BaseAgent):
                     available = limit - remaining
                     logger.info(f"[{self.name}] ElevenLabs quota: {available} chars remaining")
                     return available > 500
+                # 401 or other: key may have TTS but not subscription read — assume OK and let TTS call decide
                 if resp.status_code == 401:
-                    detail = resp.json().get("detail", {})
-                    if detail.get("status") == "missing_permissions":
-                        logger.info(f"[{self.name}] ElevenLabs key lacks user_read — assuming quota OK")
-                        return True
+                    logger.info(f"[{self.name}] ElevenLabs subscription endpoint 401 (key may be TTS-only) — assuming OK")
+                return True
         except Exception as e:
             logger.warning(f"[{self.name}] Could not check ElevenLabs quota: {e}")
+        return False
+
+    async def _elevenlabs_key_valid(self) -> bool:
+        """True if key works for TTS. 200 = full access; 401 with missing voices_read = TTS-only (use curated voices)."""
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{ELEVENLABS_BASE_URL}/v2/voices",
+                    headers=get_elevenlabs_headers(),
+                    params={"page_size": 1},
+                    timeout=10.0,
+                )
+                if resp.status_code == 200:
+                    return True
+                if resp.status_code == 401 and elevenlabs_401_is_tts_only(resp.text):
+                    logger.info(
+                        "[%s] ElevenLabs key is TTS-only (no voices_read); using curated voice list.",
+                        self.name,
+                    )
+                    return True
+                if resp.status_code == 401:
+                    logger.warning(
+                        "[%s] ElevenLabs 401 — API key invalid or expired. Falling back to Edge TTS.",
+                        self.name,
+                    )
+                    return False
+        except Exception as e:
+            logger.warning(f"[{self.name}] ElevenLabs check failed: {e}")
         return False
 
     async def _generate_edge_tts(
@@ -911,33 +951,36 @@ class AudioProducerAgent(BaseAgent):
         voice: str,
         output_path: Path,
         section_type: str = "main",
+        voice_settings: dict[str, Any] | None = None,
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
         custom_bgm_path: Path | None = None,
     ) -> dict[str, Any]:
-        """Generate audio using edge-tts with prosody and optional background music."""
+        """Generate audio using edge-tts with section prosody, user speed, and optional BGM."""
         clean_text = _clean_text_for_tts(text)
-        logger.info(f"[{self.name}] TTS input (first 120 chars): {clean_text[:120]!r}")
+        logger.debug(f"[{self.name}] TTS input (first 120 chars): {clean_text[:120]!r}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         prosody = SECTION_PROSODY.get(section_type, {"rate": "+0%", "pitch": "+0Hz"})
+        speed = float((voice_settings or {}).get("speed", 1.0))
+        rate_str = _edge_rate_with_speed(section_type, speed)
 
         if skip_bgm:
             communicate = edge_tts.Communicate(
-                clean_text, voice, rate=prosody["rate"], pitch=prosody["pitch"]
+                clean_text, voice, rate=rate_str, pitch=prosody["pitch"]
             )
             await communicate.save(str(output_path))
         else:
             voice_only_path = output_path.with_suffix(".voice.mp3")
             communicate = edge_tts.Communicate(
-                clean_text, voice, rate=prosody["rate"], pitch=prosody["pitch"]
+                clean_text, voice, rate=rate_str, pitch=prosody["pitch"]
             )
             await communicate.save(str(voice_only_path))
-            _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
+            await _mix_voice_with_music_async(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
             voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
-        logger.info(
+        logger.debug(
             f"[{self.name}] edge-tts: {output_path.name} "
             f"({file_size / 1024:.1f} KB, voice={voice}, section={section_type})"
         )
@@ -958,18 +1001,24 @@ class AudioProducerAgent(BaseAgent):
         locale: str,
         output_path: Path,
         style: str = "Conversational",
+        section_type: str = "main",
+        voice_settings: dict[str, Any] | None = None,
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
         custom_bgm_path: Path | None = None,
     ) -> dict[str, Any]:
-        """Generate audio using Murf AI API with pronunciation dictionary."""
+        """Generate audio using Murf AI API with pronunciation, speed, and section expression."""
         clean_text = _clean_text_for_tts(text, apply_pronunciation_hacks=False)
 
-        logger.info(f"[{self.name}] Murf TTS input (first 150 chars): {clean_text[:150]!r}")
+        logger.debug(f"[{self.name}] Murf TTS input (first 150 chars): {clean_text[:150]!r}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Murf supports inline pause tags: [pause 1s]
         clean_text = re.sub(r"\.{3,}", " [pause 0.5s] ", clean_text)
+
+        speed = float((voice_settings or {}).get("speed", 1.0))
+        rate_delta = int((speed - 1.0) * 100)
+        rate_delta = max(-50, min(50, rate_delta))
 
         payload: dict[str, Any] = {
             "text": clean_text,
@@ -980,6 +1029,7 @@ class AudioProducerAgent(BaseAgent):
             "channelType": "STEREO",
             "variation": 2,
             "pronunciationDictionary": MURF_PRONUNCIATION,
+            "rate": rate_delta,
         }
         if locale:
             payload["multiNativeLocale"] = locale
@@ -1005,7 +1055,7 @@ class AudioProducerAgent(BaseAgent):
             audio_length = data.get("audioLengthInSeconds", 0)
             remaining = data.get("remainingCharacterCount", -1)
 
-            logger.info(
+            logger.debug(
                 f"[{self.name}] Murf response: {audio_length:.1f}s, "
                 f"remaining chars: {remaining}"
             )
@@ -1022,11 +1072,11 @@ class AudioProducerAgent(BaseAgent):
             else:
                 voice_only_path = output_path.with_suffix(".voice.mp3")
                 voice_only_path.write_bytes(audio_response.content)
-                _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
+                await _mix_voice_with_music_async(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
                 voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
-        logger.info(
+        logger.debug(
             f"[{self.name}] Murf: {output_path.name} "
             f"({file_size / 1024:.1f} KB, voice={voice_id}, locale={locale})"
         )
@@ -1047,11 +1097,11 @@ class AudioProducerAgent(BaseAgent):
         voice_settings: dict[str, Any],
         output_path: Path,
         model_id: str | None = None,
+        section_type: str = "main",
         skip_bgm: bool = False,
         bgm_style: str = "upbeat",
         custom_bgm_path: Path | None = None,
         language_code: str | None = None,
-        accent_desc: str = "",
     ) -> dict[str, Any]:
         effective_model = model_id or ELEVENLABS_TTS_MODEL
         url = f"{ELEVENLABS_BASE_URL}/v1/text-to-speech/{voice_id}"
@@ -1064,11 +1114,15 @@ class AudioProducerAgent(BaseAgent):
         default_stability = 0.65 if is_v3 else 0.35
         default_similarity = 0.85
         default_style = 0.25 if is_v3 else 0.45
+        style_val = float(voice_settings.get("style", live.get("voice_style", default_style)))
+
+        # Speed applies to both v3 (top-level) and v2 (inside voice_settings per API)
+        speed_val = float(voice_settings.get("speed", live.get("voice_speed", 1.0)))
 
         vs: dict[str, Any] = {
             "stability": voice_settings.get("stability", live.get("voice_stability", default_stability)),
             "similarity_boost": voice_settings.get("similarity_boost", live.get("voice_similarity_boost", default_similarity)),
-            "style": voice_settings.get("style", live.get("voice_style", default_style)),
+            "style": style_val,
             "use_speaker_boost": True,
         }
 
@@ -1076,43 +1130,74 @@ class AudioProducerAgent(BaseAgent):
             "text": clean_text,
             "model_id": effective_model,
             "voice_settings": vs,
+            "apply_text_normalization": "on",
         }
 
-        if is_v3:
-            speed = voice_settings.get("speed", live.get("voice_speed", 1.0))
-            payload["speed"] = speed
+        def _apply_lang_accent(p: dict[str, Any], model: str) -> None:
+            """Attach language_code for local language. v3 supports many languages; v2 only ~29 (no sw, am)."""
             if language_code:
-                payload["language_code"] = language_code
-            if accent_desc:
-                payload["previous_text"] = (
-                    f"Speaking with a warm, natural {accent_desc} accent and clear enunciation. "
-                )
+                if "v3" in model or language_code in ELEVENLABS_V2_SUPPORTED_LANG_CODES:
+                    p["language_code"] = language_code
+
+        if is_v3:
+            # v3: top-level speed; voice_settings.speed not used for v3 in our stack
+            payload["speed"] = speed_val
+            _apply_lang_accent(payload, effective_model)
+        else:
+            # Primary v2 (or any non-v3): speed only inside voice_settings; lang only if v2 supports it
+            payload["voice_settings"] = {**vs, "speed": speed_val}
+            _apply_lang_accent(payload, effective_model)
 
         headers = {
-            "xi-api-key": ELEVENLABS_API_KEY,
+            **get_elevenlabs_headers(),
             "Content-Type": "application/json",
             "Accept": "audio/mpeg",
         }
         params = {"output_format": ELEVENLABS_OUTPUT_FORMAT}
 
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url, json=payload, headers=headers, params=params, timeout=30.0,
-            )
+            response = None
+            for attempt in range(2):
+                try:
+                    response = await client.post(
+                        url, json=payload, headers=headers, params=params, timeout=30.0,
+                    )
+                    break
+                except httpx.ConnectError as e:
+                    if attempt == 0:
+                        logger.warning(
+                            "[%s] ElevenLabs connection error, retrying in 1.5s: %s",
+                            self.name, e,
+                        )
+                        await asyncio.sleep(1.5)
+                    else:
+                        raise
 
-            # Auto-fallback: if v3 fails, retry with eleven_multilingual_v2
+            # Auto-fallback: if v3 fails, retry with eleven_multilingual_v2 — keep speed; v2 supports only ~29 languages (no Swahili, Amharic, etc.)
             if response.status_code != 200 and is_v3:
                 logger.warning(
                     f"[{self.name}] eleven_v3 returned {response.status_code}, "
-                    f"falling back to eleven_multilingual_v2"
+                    f"falling back to eleven_multilingual_v2 (v2 has limited language set)"
                 )
                 payload["model_id"] = "eleven_multilingual_v2"
-                payload.pop("speed", None)
+                payload.pop("speed", None)  # v3 top-level; v2 uses voice_settings.speed
+                payload["voice_settings"] = {**vs, "speed": speed_val}
+                # v2 does not support all v3 languages (e.g. no "sw" Swahili) — omit language_code so v2 doesn't 400
                 payload.pop("language_code", None)
                 payload.pop("previous_text", None)
                 response = await client.post(
                     url, json=payload, headers=headers, params=params, timeout=30.0,
                 )
+                if response.status_code == 422:
+                    payload.pop("previous_text", None)
+                    response = await client.post(
+                        url, json=payload, headers=headers, params=params, timeout=30.0,
+                    )
+                if response.status_code == 422:
+                    payload.pop("language_code", None)
+                    response = await client.post(
+                        url, json=payload, headers=headers, params=params, timeout=30.0,
+                    )
                 effective_model = "eleven_multilingual_v2"
 
             if response.status_code != 200:
@@ -1126,7 +1211,7 @@ class AudioProducerAgent(BaseAgent):
             else:
                 voice_only_path = output_path.with_suffix(".voice.mp3")
                 voice_only_path.write_bytes(response.content)
-                _mix_voice_with_music(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
+                await _mix_voice_with_music_async(voice_only_path, output_path, bgm_style=bgm_style, custom_bgm_path=custom_bgm_path)
                 voice_only_path.unlink(missing_ok=True)
 
         file_size = output_path.stat().st_size
@@ -1147,7 +1232,7 @@ class AudioProducerAgent(BaseAgent):
                 # Quick check: try to get the specific voice directly
                 response = await client.get(
                     f"{ELEVENLABS_BASE_URL}/v1/voices/{voice_id}",
-                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    headers=get_elevenlabs_headers(),
                     timeout=10.0,
                 )
                 if response.status_code == 200:
@@ -1228,7 +1313,7 @@ class AudioProducerAgent(BaseAgent):
                 alt_candidates.append((alt_id, alt_name, gender_hint))
                 seen_ids.add(alt_id)
 
-        # ── Region detection (used for API accent priority + curated fallbacks) ──
+        # ── Region detection (for curated fallback labels only) ──
         _country_lower = country.lower().strip()
         is_african = _country_lower in {
             "nigeria", "kenya", "tanzania", "south africa", "ghana",
@@ -1258,42 +1343,14 @@ class AudioProducerAgent(BaseAgent):
             "japan", "china", "mongolia", "laos",
         }
 
-        # ── Try fetching premium voices from API for more variety ──
+        # ── Fetch user's voices from API (no accent filtering) ──
         api_female: list[tuple[str, str]] = []
         api_male: list[tuple[str, str]] = []
-        preferred_accents: set[str] = set()
-        if is_african:
-            preferred_accents = {"african", "nigerian", "kenyan", "south african", "neutral", ""}
-        elif is_south_asian:
-            preferred_accents = {"indian", "south asian", "neutral", ""}
-        elif is_middle_east:
-            preferred_accents = {"arabic", "middle eastern", "neutral", ""}
-        elif is_latam:
-            preferred_accents = {"latin", "spanish", "brazilian", "neutral", ""}
-        elif is_apac:
-            preferred_accents = {"asian", "filipino", "indonesian", "neutral", ""}
-
-        # Search accents to query from the shared voice library
-        _shared_accent_queries: list[str] = []
-        if is_african:
-            _shared_accent_queries = ["african", "nigerian", "kenyan", "south african"]
-        elif is_south_asian:
-            _shared_accent_queries = ["indian"]
-        elif is_middle_east:
-            _shared_accent_queries = ["arabic", "middle eastern"]
-        elif is_latam:
-            _shared_accent_queries = ["latin american", "mexican", "brazilian"]
-        elif is_apac:
-            _shared_accent_queries = ["filipino", "indonesian", "malaysian"]
-
-        api_female_preferred: list[tuple[str, str]] = []
-        api_male_preferred: list[tuple[str, str]] = []
         try:
             async with httpx.AsyncClient() as client:
-                # 1. Check user's own library first
                 resp = await client.get(
                     f"{ELEVENLABS_BASE_URL}/v2/voices",
-                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    headers=get_elevenlabs_headers(),
                     params={"page_size": 100},
                     timeout=10.0,
                 )
@@ -1306,67 +1363,15 @@ class AudioProducerAgent(BaseAgent):
                         name = v.get("name", "")
                         labels = v.get("labels", {})
                         gender = labels.get("gender", "").lower()
-                        accent = labels.get("accent", "").lower()
-                        cat = v.get("category", "")
-                        if cat in ("professional", "high_quality", "cloned"):
-                            display_accent = labels.get("accent", "Neutral") or "Neutral"
-                            label = f"{name} (Female, {display_accent})" if gender == "female" else f"{name} (Male, {display_accent})"
-                            is_preferred = accent in preferred_accents if preferred_accents else False
-                            if gender == "female":
-                                if is_preferred:
-                                    api_female_preferred.append((vid, label))
-                                else:
-                                    api_female.append((vid, label))
-                            elif gender == "male":
-                                if is_preferred:
-                                    api_male_preferred.append((vid, label))
-                                else:
-                                    api_male.append((vid, label))
-
-                # 2. Search shared voice library for region-specific accented voices
-                if _shared_accent_queries and (len(api_female_preferred) + len(api_male_preferred) < 3):
-                    for accent_q in _shared_accent_queries[:2]:
-                        for gender_q in ("female", "male"):
-                            try:
-                                shared_resp = await client.get(
-                                    f"{ELEVENLABS_BASE_URL}/v1/shared-voices",
-                                    headers={"xi-api-key": ELEVENLABS_API_KEY},
-                                    params={
-                                        "page_size": 5,
-                                        "accent": accent_q,
-                                        "gender": gender_q,
-                                        "language": "en",
-                                    },
-                                    timeout=8.0,
-                                )
-                                if shared_resp.status_code == 200:
-                                    shared_voices = shared_resp.json().get("voices", [])
-                                    for sv in shared_voices:
-                                        svid = sv.get("voice_id", "")
-                                        if not svid or svid in seen_ids:
-                                            continue
-                                        sv_name = sv.get("name", "Shared Voice")
-                                        sv_accent = sv.get("accent", accent_q.title())
-                                        label = f"{sv_name} ({'Female' if gender_q == 'female' else 'Male'}, {sv_accent})"
-                                        seen_ids.add(svid)
-                                        if gender_q == "female":
-                                            api_female_preferred.append((svid, label))
-                                        else:
-                                            api_male_preferred.append((svid, label))
-                            except Exception:
-                                pass
-                    logger.info(
-                        f"[{self.name}] Shared library: found {len(api_female_preferred)}F + "
-                        f"{len(api_male_preferred)}M with accent '{_shared_accent_queries[0]}'"
-                    )
-
-                random.shuffle(api_female_preferred)
-                random.shuffle(api_male_preferred)
+                        display_accent = labels.get("accent", "Neutral") or "Neutral"
+                        label = f"{name} (Female, {display_accent})" if gender == "female" else f"{name} (Male, {display_accent})"
+                        if gender == "female":
+                            api_female.append((vid, label))
+                        elif gender == "male":
+                            api_male.append((vid, label))
                 random.shuffle(api_female)
                 random.shuffle(api_male)
-                api_female = api_female_preferred + api_female
-                api_male = api_male_preferred + api_male
-                logger.info(f"[{self.name}] API voices: {len(api_female)}F + {len(api_male)}M (preferred accent first)")
+                logger.info(f"[{self.name}] API voices: {len(api_female)}F + {len(api_male)}M")
         except Exception as e:
             logger.debug(f"[{self.name}] API voice fetch skipped: {e}")
 
@@ -1558,6 +1563,7 @@ class AudioProducerAgent(BaseAgent):
 
         if tts_engine_override in ("murf", "elevenlabs", "edge-tts"):
             tts_engine = tts_engine_override
+            logger.info(f"[{self.name}] Using user-selected TTS engine: {tts_engine}")
         else:
             # Auto priority: ElevenLabs (best quality, multilingual) > Murf > edge-tts
             if self._has_elevenlabs_credits():
@@ -1582,10 +1588,19 @@ class AudioProducerAgent(BaseAgent):
             if not self._has_elevenlabs_credits():
                 logger.warning(f"[{self.name}] ElevenLabs requested but no key; falling back")
                 tts_engine = "edge-tts"
+            elif not await self._elevenlabs_key_valid():
+                # Key present but 401 Unauthorized — use Edge TTS so audio still generates
+                tts_engine = "edge-tts"
             else:
                 el_voice_id = voice_selection["selected_voice"]["voice_id"]
                 api_params = voice_selection.get("elevenlabs_api_params", {})
                 el_model_id = api_params.get("model_id", ELEVENLABS_TTS_MODEL)
+                _lang = (language or "").lower().strip()
+                if _lang and any(unsupported in _lang for unsupported in ELEVENLABS_V3_UNSUPPORTED_LANGUAGES):
+                    el_model_id = "eleven_multilingual_v2"
+                    logger.info(
+                        f"[{self.name}] Using eleven_multilingual_v2 for language (v3 unsupported)"
+                    )
                 el_voice_id = await self._validate_voice_id(el_voice_id)
                 logger.info(f"[{self.name}] Using ElevenLabs: voice={voice_name}, model={el_model_id}")
 
@@ -1609,7 +1624,6 @@ class AudioProducerAgent(BaseAgent):
                 voice_pool.append({"el_voice_id": eid, "voice_label": lbl})
 
         el_language_code = _country_to_elevenlabs_lang_code(country, language)
-        accent_desc = _get_accent_description(country)
 
         return {
             "tts_engine": tts_engine,
@@ -1618,7 +1632,6 @@ class AudioProducerAgent(BaseAgent):
             "el_voice_id": el_voice_id,
             "el_model_id": el_model_id,
             "el_language_code": el_language_code,
-            "el_accent_desc": accent_desc,
             "edge_voice": edge_voice,
             "murf_voice_id": murf_voice_id,
             "murf_locale": murf_locale,
@@ -1638,7 +1651,6 @@ class AudioProducerAgent(BaseAgent):
         el_voice_id = engine_ctx["el_voice_id"]
         el_model_id = engine_ctx["el_model_id"]
         el_language_code = engine_ctx.get("el_language_code")
-        el_accent_desc = engine_ctx.get("el_accent_desc", "")
         edge_voice = engine_ctx["edge_voice"]
 
         async def _tts_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -1665,6 +1677,8 @@ class AudioProducerAgent(BaseAgent):
                         locale=job["murf_locale"],
                         output_path=job["path"],
                         style=job["murf_style"],
+                        section_type=job.get("type", "main"),
+                        voice_settings=voice_settings,
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
                         custom_bgm_path=custom_bgm,
@@ -1676,18 +1690,19 @@ class AudioProducerAgent(BaseAgent):
                         voice_settings=voice_settings,
                         output_path=job["path"],
                         model_id=el_model_id,
+                        section_type=job.get("type", "main"),
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
                         custom_bgm_path=custom_bgm,
                         language_code=el_language_code,
-                        accent_desc=el_accent_desc,
                     )
                 else:
                     result = await self._generate_edge_tts(
                         text=job["text"],
                         voice=job.get("edge_voice", edge_voice),
                         output_path=job["path"],
-                        section_type=job["type"],
+                        section_type=job.get("type", "main"),
+                        voice_settings=voice_settings,
                         skip_bgm=skip_bgm,
                         bgm_style=bgm_style,
                         custom_bgm_path=custom_bgm,
@@ -1730,7 +1745,7 @@ class AudioProducerAgent(BaseAgent):
 
                         public_url = supabase.storage.from_(bucket_name).get_public_url(storage_path)
                         result["public_url"] = public_url
-                        logger.info(f"[{self.name}] Uploaded {file_path.name} to Supabase Storage")
+                        logger.debug(f"[{self.name}] Uploaded {file_path.name} to Supabase Storage")
 
                         try:
                             file_path.unlink()
@@ -1746,7 +1761,7 @@ class AudioProducerAgent(BaseAgent):
 
                 # Retry once on transient failures
                 try:
-                    logger.info(f"[{self.name}] Retrying {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}...")
+                    logger.debug(f"[{self.name}] Retrying {job['type']} v{job['variant_id']} voice{job.get('voice_index', 1)}...")
                     if tts_engine == "elevenlabs":
                         result = await self._generate_elevenlabs(
                             text=job["text"],
@@ -1754,27 +1769,31 @@ class AudioProducerAgent(BaseAgent):
                             voice_settings=voice_settings,
                             output_path=job["path"],
                             model_id=el_model_id,
+                            section_type=job.get("type", "main"),
                             skip_bgm=True,
                             language_code=el_language_code,
-                            accent_desc=el_accent_desc,
                         )
                     elif tts_engine == "murf":
                         result = await self._generate_murf_tts(
                             text=job["text"], voice_id=job["murf_voice_id"],
                             locale=job["murf_locale"], output_path=job["path"],
-                            style=job["murf_style"], skip_bgm=True,
+                            style=job["murf_style"],
+                            section_type=job.get("type", "main"),
+                            voice_settings=voice_settings,
+                            skip_bgm=True,
                         )
                     else:
                         result = await self._generate_edge_tts(
                             text=job["text"], voice=job.get("edge_voice", edge_voice),
-                            output_path=job["path"], section_type=job["type"], skip_bgm=True,
+                            output_path=job["path"], section_type=job.get("type", "main"),
+                            voice_settings=voice_settings, skip_bgm=True,
                         )
                     result["variant_id"] = job["variant_id"]
                     result["type"] = job["type"]
                     result["theme"] = job.get("theme", "")
                     result["voice_index"] = job.get("voice_index", 1)
                     result["voice_label"] = job.get("voice_label", "Voice 1")
-                    logger.info(f"[{self.name}] Retry succeeded for v{job['variant_id']} voice{job.get('voice_index', 1)}")
+                    logger.debug(f"[{self.name}] Retry succeeded for v{job['variant_id']} voice{job.get('voice_index', 1)}")
                     return result
                 except Exception:
                     pass
@@ -1827,6 +1846,8 @@ class AudioProducerAgent(BaseAgent):
             voice_pool.append(voice_pool[0])
         voice_pool = voice_pool[:n_voices]
         script_list = scripts.get("scripts", [])
+        # Hook previews must stay short + voice-only — no BGM (avoids 15× ffmpeg hangs)
+        _PREVIEW_MAX_CHARS = 500
 
         jobs: list[dict[str, Any]] = []
         for script in script_list:
@@ -1834,7 +1855,9 @@ class AudioProducerAgent(BaseAgent):
             theme = script.get("theme", "unknown")
             hook_text = script.get("hook", "")
             if not hook_text or not hook_text.strip():
-                hook_text = script.get("full_script", "")
+                hook_text = script.get("full_script", "") or ""
+            if hook_text and len(hook_text) > _PREVIEW_MAX_CHARS:
+                hook_text = hook_text[:_PREVIEW_MAX_CHARS].rsplit(" ", 1)[0] + "..."
 
             if not hook_text or not hook_text.strip():
                 continue
@@ -1847,7 +1870,7 @@ class AudioProducerAgent(BaseAgent):
                     "type": "hook_preview",
                     "theme": theme,
                     "voice_index": voice_idx + 1,
-                    "skip_bgm": False,
+                    "skip_bgm": True,
                 }
                 job.update(voice_pool[voice_idx])
                 jobs.append(job)
@@ -1858,8 +1881,8 @@ class AudioProducerAgent(BaseAgent):
         successful = [r for r in results if "error" not in r]
         failed = [r for r in results if "error" in r]
 
-        # Auto-fallback: if ALL jobs failed, retry with next available engine
-        if len(successful) == 0 and len(failed) > 0:
+        # Auto-fallback only when engine was Auto; never override user's choice
+        if len(successful) == 0 and len(failed) > 0 and not tts_engine_override:
             fallback_order = ["murf", "edge-tts"]
             for fb_engine in fallback_order:
                 if fb_engine == tts_engine:
@@ -1882,7 +1905,9 @@ class AudioProducerAgent(BaseAgent):
                     theme = script.get("theme", "unknown")
                     hook_text = script.get("hook", "") or ""
                     if not hook_text.strip():
-                        hook_text = (script.get("full_script", "") or "")[:200]
+                        hook_text = (script.get("full_script", "") or "")[:_PREVIEW_MAX_CHARS]
+                    if len(hook_text) > _PREVIEW_MAX_CHARS:
+                        hook_text = hook_text[:_PREVIEW_MAX_CHARS].rsplit(" ", 1)[0] + "..."
                     if not hook_text.strip():
                         continue
                     for vi in range(min(n_voices, len(voice_pool))):
@@ -1893,7 +1918,7 @@ class AudioProducerAgent(BaseAgent):
                             "type": "hook_preview",
                             "theme": theme,
                             "voice_index": vi + 1,
-                            "skip_bgm": False,
+                            "skip_bgm": True,
                         }
                         rj.update(voice_pool[vi])
                         retry_jobs.append(rj)
@@ -1954,12 +1979,30 @@ class AudioProducerAgent(BaseAgent):
         session_dir = OUTPUTS_DIR / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
 
-        if prebuilt_engine_ctx:
+        if prebuilt_engine_ctx and isinstance(prebuilt_engine_ctx, dict) and (prebuilt_engine_ctx.get("voice_pool") or []):
             engine_ctx = prebuilt_engine_ctx
         else:
             engine_ctx = await self._resolve_engine(voice_selection, country, language, tts_engine_override)
         tts_engine = engine_ctx["tts_engine"]
-        voice_pool = engine_ctx["voice_pool"]
+        voice_pool = engine_ctx.get("voice_pool") or []
+        if not voice_pool:
+            # Final fallback: force edge-tts so we always have a voice pool
+            logger.warning(f"[{self.name}] run_final_audio: voice_pool was empty; resolving edge-tts fallback")
+            engine_ctx = await self._resolve_engine(voice_selection, country, language, "edge-tts")
+            voice_pool = engine_ctx.get("voice_pool") or []
+            tts_engine = engine_ctx["tts_engine"]
+        if not voice_pool:
+            logger.error(f"[{self.name}] run_final_audio: voice_pool still empty after edge-tts fallback")
+            return {
+                "session_id": session_id,
+                "session_dir": str(session_dir),
+                "tts_engine": tts_engine,
+                "voice_used": {},
+                "audio_files": [],
+                "failed_files": [],
+                "summary": {"total_generated": 0, "total_failed": 0, "variants_count": 0, "has_background_music": False, "bgm_style": bgm_style, "output_quality": ""},
+                "error": "No voice pool available for TTS",
+            }
         script_list = scripts.get("scripts", [])
 
         ALL_SECTIONS = [
@@ -1969,32 +2012,92 @@ class AudioProducerAgent(BaseAgent):
             ("polite_closure", "closure"),
         ]
 
+        def make_job(
+            text: str,
+            audio_type: str,
+            variant_id: int,
+            theme: str,
+            chosen_idx: int,
+            no_bgm: bool,
+            resolved_bgm_path: Path | None,
+        ) -> dict[str, Any]:
+            j: dict[str, Any] = {
+                "text": text,
+                "path": session_dir / f"variant_{variant_id}_voice{chosen_idx + 1}_{audio_type}.mp3",
+                "variant_id": variant_id,
+                "type": audio_type,
+                "theme": theme,
+                "voice_index": chosen_idx + 1,
+                "skip_bgm": no_bgm,
+                "bgm_style": bgm_style if not no_bgm else "upbeat",
+                "custom_bgm_path": str(resolved_bgm_path) if resolved_bgm_path else None,
+            }
+            j.update(voice_pool[chosen_idx])
+            return j
+
         jobs: list[dict[str, Any]] = []
+        no_bgm = bgm_style == "none"
+        resolved_bgm_path = Path(custom_bgm_path) if custom_bgm_path else None
+
         for script in script_list:
             variant_id = script.get("variant_id", 0)
             theme = script.get("theme", "unknown")
             chosen_idx = voice_choices.get(variant_id, 1) - 1
             chosen_idx = max(0, min(chosen_idx, len(voice_pool) - 1))
 
-            no_bgm = bgm_style == "none"
-            resolved_bgm_path = Path(custom_bgm_path) if custom_bgm_path else None
-            for field, audio_type in ALL_SECTIONS:
-                text = script.get(field, "")
-                if not text or not text.strip():
-                    continue
-                job: dict[str, Any] = {
-                    "text": text,
-                    "path": session_dir / f"variant_{variant_id}_voice{chosen_idx + 1}_{audio_type}.mp3",
-                    "variant_id": variant_id,
-                    "type": audio_type,
-                    "theme": theme,
-                    "voice_index": chosen_idx + 1,
-                    "skip_bgm": no_bgm,
-                    "bgm_style": bgm_style if not no_bgm else "upbeat",
-                    "custom_bgm_path": str(resolved_bgm_path) if resolved_bgm_path else None,
-                }
-                job.update(voice_pool[chosen_idx])
-                jobs.append(job)
+            segments = script.get("segments")
+            full_script_text = (script.get("full_script") or "").strip()
+            is_flow_script = isinstance(segments, list) and len(segments) > 0
+            segment_texts = [(seg.get("text") or "").strip() for seg in segments] if is_flow_script else []
+            segments_match_full = (
+                full_script_text and segment_texts and full_script_text == " ".join(segment_texts)
+            )
+            has_segment_text = bool(segment_texts and any(segment_texts))
+            if has_segment_text and (not full_script_text or segments_match_full):
+                # Flow-based: use segment texts (and they match full_script if present)
+                for seg in segments:
+                    step_id = seg.get("step_id", "step")
+                    text = (seg.get("text") or "").strip()
+                    if not text:
+                        continue
+                    audio_type = f"step_{step_id}"
+                    jobs.append(make_job(text, audio_type, variant_id, theme, chosen_idx, no_bgm, resolved_bgm_path))
+            elif is_flow_script and full_script_text:
+                # Flow campaign but segments empty/stale; user edited full_script only (e.g. added "BTC")
+                jobs.append(
+                    make_job(
+                        full_script_text,
+                        "main",
+                        variant_id,
+                        theme,
+                        chosen_idx,
+                        no_bgm,
+                        resolved_bgm_path,
+                    )
+                )
+            else:
+                # Non-flow (default): main + fallback1 + fallback2 + closure
+                for field, audio_type in ALL_SECTIONS:
+                    text = script.get(field, "")
+                    if not text or not str(text).strip():
+                        continue
+                    jobs.append(make_job(str(text).strip(), audio_type, variant_id, theme, chosen_idx, no_bgm, resolved_bgm_path))
+
+        if not jobs:
+            logger.warning(
+                f"[{self.name}] run_final_audio: no TTS jobs built (scripts={len(script_list)}, "
+                "check script structure: full_script/segments and section text)"
+            )
+            return {
+                "session_id": session_id,
+                "session_dir": str(session_dir),
+                "tts_engine": tts_engine,
+                "voice_used": {},
+                "audio_files": [],
+                "failed_files": [],
+                "summary": {"total_generated": 0, "total_failed": 0, "variants_count": len(script_list), "has_background_music": False, "bgm_style": bgm_style, "output_quality": ""},
+                "error": "No audio segments to generate (script sections may be empty)",
+            }
 
         logger.info(
             f"[{self.name}] Generating {len(jobs)} final audio files via {tts_engine} "
@@ -2004,9 +2107,12 @@ class AudioProducerAgent(BaseAgent):
 
         successful = [r for r in results if "error" not in r]
         failed = [r for r in results if "error" in r]
+        logger.info(
+            f"[{self.name}] Final audio TTS phase done: {len(successful)} ok, {len(failed)} failed"
+        )
 
-        # Auto-fallback: if ALL jobs failed, retry with next available engine
-        if len(successful) == 0 and len(failed) > 0:
+        # Auto-fallback only when engine was Auto; never override user's choice
+        if len(successful) == 0 and len(failed) > 0 and not tts_engine_override:
             for fb_engine in ["murf", "edge-tts"]:
                 if fb_engine == tts_engine:
                     continue
@@ -2021,27 +2127,33 @@ class AudioProducerAgent(BaseAgent):
                 )
                 tts_engine = engine_ctx["tts_engine"]
                 voice_pool = engine_ctx["voice_pool"]
-                retry_jobs: list[dict[str, Any]] = []
+                retry_jobs = []
                 for script in script_list:
-                    variant_id = script.get("variant_id", 0)
-                    theme = script.get("theme", "unknown")
-                    chosen_idx = max(0, min(voice_choices.get(variant_id, 1) - 1, len(voice_pool) - 1))
-                    for field, audio_type in ALL_SECTIONS:
-                        text = script.get(field, "")
-                        if not text or not text.strip():
-                            continue
-                        rj: dict[str, Any] = {
-                            "text": text,
-                            "path": session_dir / f"variant_{variant_id}_voice{chosen_idx + 1}_{audio_type}.mp3",
-                            "variant_id": variant_id,
-                            "type": audio_type,
-                            "theme": theme,
-                            "voice_index": chosen_idx + 1,
-                            "skip_bgm": False,
-                            "bgm_style": bgm_style,
-                        }
-                        rj.update(voice_pool[chosen_idx])
-                        retry_jobs.append(rj)
+                    vid = script.get("variant_id", 0)
+                    th = script.get("theme", "unknown")
+                    cidx = max(0, min(voice_choices.get(vid, 1) - 1, len(voice_pool) - 1))
+                    segs = script.get("segments")
+                    is_flow = isinstance(segs, list) and len(segs) > 0
+                    fst = (script.get("full_script") or "").strip()
+                    seg_txts = [(s.get("text") or "").strip() for s in segs] if is_flow else []
+                    segs_match = fst and seg_txts and fst == " ".join(seg_txts)
+                    has_stext = bool(seg_txts and any(seg_txts))
+                    if has_stext and (not fst or segs_match):
+                        for seg in segs:
+                            step_id = seg.get("step_id", "step")
+                            t = (seg.get("text") or "").strip()
+                            if not t:
+                                continue
+                            at = f"step_{step_id}"
+                            retry_jobs.append(make_job(t, at, vid, th, cidx, False, resolved_bgm_path))
+                    elif is_flow and fst:
+                        retry_jobs.append(make_job(fst, "main", vid, th, cidx, False, resolved_bgm_path))
+                    else:
+                        for field, audio_type in ALL_SECTIONS:
+                            text = script.get(field, "")
+                            if not text or not str(text).strip():
+                                continue
+                            retry_jobs.append(make_job(str(text).strip(), audio_type, vid, th, cidx, False, resolved_bgm_path))
                 results = await self._run_tts_jobs(retry_jobs, engine_ctx, audio_format=audio_format)
                 successful = [r for r in results if "error" not in r]
                 failed = [r for r in results if "error" in r]

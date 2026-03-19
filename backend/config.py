@@ -1,5 +1,6 @@
 """Configuration management for OBD SuperStar Agent."""
 
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -23,10 +24,50 @@ AZURE_OPENAI_API_VERSION = _env("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"
 DEFAULT_LLM_PROVIDER = _env("DEFAULT_LLM_PROVIDER", "azure_openai")
 
 # --- ElevenLabs Configuration ---
-ELEVENLABS_API_KEY = _env("ELEVENLABS_API_KEY")
+def _env_elevenlabs(key: str) -> str:
+    """Load ELEVENLABS_API_KEY: strip quotes, newlines, and invisible chars so it matches the key used in curl."""
+    v = _env(key)
+    if not v:
+        return ""
+    # Remove surrounding quotes (single or double)
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        v = v[1:-1]
+    # Strip all whitespace (including Unicode) from ends
+    v = v.strip()
+    # Remove newlines, carriage returns, tabs (paste from terminal can add these)
+    v = v.replace("\n", "").replace("\r", "").replace("\t", "")
+    # Keep only ASCII printable (API keys are ASCII; copy-paste can add Unicode lookalikes)
+    v = "".join(c for c in v if ord(c) >= 32 and ord(c) <= 126)
+    return v.strip()
+
+
+ELEVENLABS_API_KEY = _env_elevenlabs("ELEVENLABS_API_KEY")
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
 ELEVENLABS_TTS_MODEL = "eleven_v3"
 ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_192"
+
+
+def get_elevenlabs_headers() -> dict[str, str]:
+    """Headers for ElevenLabs API. Use a browser-like User-Agent: httpx is often rejected with 401 otherwise."""
+    return {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+
+
+def elevenlabs_401_is_tts_only(response_text: str) -> bool:
+    """True if 401 is due to missing voices_read (key is valid for TTS only; we use curated voice list)."""
+    if not response_text:
+        return False
+    try:
+        data = json.loads(response_text)
+        detail = data.get("detail") or {}
+        status = detail.get("status", "")
+        msg = (detail.get("message") or "").lower()
+        return status == "missing_permissions" or "voices_read" in msg
+    except Exception:
+        return False
+
 
 # --- Murf AI Configuration ---
 MURF_API_KEY = _env("MURF_API_KEY")
