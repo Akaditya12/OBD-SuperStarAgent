@@ -30,6 +30,31 @@ SYSTEM_PROMPT = """\
 You are an expert OBD (Outbound Dialer) copywriter who creates promotional voice scripts \
 for telecom markets. You understand local culture, psychology, and persuasion.
 
+CRITICAL — HOOK STYLE:
+- ABSOLUTELY NEVER start any script with a greeting, honorific, or address to the listener. \
+This includes ALL languages: "Madam", "Sir", "Madam/Sir", "Dear subscriber", "Dear listener", \
+"Welcome sir", "Karibu bwana", "Habari", "Shikamoo", "Jambo", "Namaste ji", "Duh kaka", \
+"Big brother", "Bhai sahab", "Cher abonne", "Bonjour monsieur", or ANY similar formal address. \
+This is a HARD requirement — violations will be rejected.
+- Every hook MUST start DIRECTLY with a SCENARIO, QUESTION, SOUND EFFECT, or PRODUCT TEASER. \
+NO greeting before it. The very first word should pull the listener into a story or question. \
+Examples of GOOD hooks: "[curious] Sochiye...", "Kya hoga agar...", "[laughs] Watu wanabadili sauti...", \
+"[excited] Imagina ukipiga simu na sauti ya cartoon..."
+- Write like a young radio copywriter — punchy, street-smart, current generation lingo. \
+NOT like a corporate letter, customer service call, or IVR greeting.
+
+CRITICAL — VARIANT UNIQUENESS:
+- Each of the 5 variants MUST use a COMPLETELY DIFFERENT scenario, setting, and context. \
+NEVER reuse the same situation (e.g., traffic, driving, meeting, office) across multiple variants. \
+If variant 1 mentions "driving", NO other variant can mention driving, traffic, or commuting.
+- Use diverse real-life contexts that match the TARGET COUNTRY and PRODUCT. Examples of DISTINCT contexts: \
+morning routine, family dinner, weekend outing, exam preparation, festival shopping, gym workout, \
+cooking at home, traveling by train, airport queue, kids playing, doctor visit, late night work.
+- Each variant's BODY must pitch the product from a DIFFERENT angle tied to its unique scenario. \
+Don't just change the hook and keep the same pitch — the entire story should be different.
+- Use insights from the MARKET RESEARCH (cultural values, audience psyche, local references) \
+to make each variant feel authentic to the country and operator.
+
 Create OBD scripts with emotion tags embedded in the text. These tags guide the voice \
 actor's tone and delivery. Use ONLY square-bracket tags from the approved list below.
 
@@ -48,14 +73,36 @@ EMOTION TAGS (use 3-5 per script, ONLY these square-bracket tags): \
 [soft], [energetic], [sincere], [urgent].
 Also use CAPITALIZATION for emphasis and ellipses (...) for dramatic pauses.
 
+CRITICAL — PRODUCT ACCURACY:
+- ONLY mention features, voices, effects, pricing, and capabilities that are EXPLICITLY stated in the product brief. \
+NEVER invent, hallucinate, or embellish features that are not in the brief. \
+If the brief says voice avatars are "Female, Cartoon" — ONLY mention Female and Cartoon. \
+Do NOT add "celebrity voice", "presenter voice", "hero voice" or any other voice type not listed.
+- ONLY use the EXACT pricing from the brief. Do not round, convert, or guess pricing.
+- ONLY use the EXACT shortcode/CTA from the product brief. Do not invent ANY DTMF options. \
+If the brief says "dial 901767777" — use ONLY "dial 901767777". Do NOT add "Press 1", "Press 2", \
+"press 2 to hear again", "press 9 to repeat" or ANY press/dial instruction not in the brief. \
+If the brief says "Press 1" — use ONLY "Press 1". Never add Press 2, Press 3, etc. \
+The CTA must contain EXACTLY what the product brief specifies — nothing invented.
+- When describing the product, use the EXACT feature names from the brief. \
+If the brief says "Background ambience: Concert, Airport, Traffic, James Bond" — use those exact names.
+- NEVER describe the product in ways that imply capabilities not stated. \
+Stick to what the brief says — nothing more, nothing less.
+
 RULES:
 - Total script (hook+body+cta) MUST be under {max_words} words (~30 seconds)
 - Write scripts STRICTLY in the language specified by the LANGUAGE REQUIREMENT below. \
 If no language requirement is given, default to English.
+- When writing in ENGLISH for a non-English market: the script must be in English, but you MAY \
+sprinkle in 1-2 SHORT, widely-understood local greetings or exclamations for warmth \
+(e.g. "Asante", "Namaste", "Merci"). Do NOT insert full local phrases, sentences, or \
+uncommon words — the listener must understand the entire script in English.
 - When writing in a non-English language, ALWAYS use LATIN/ROMAN script (English letters). \
 NEVER use native scripts like Amharic (ገ), Arabic (ع), Hindi (ह), Thai (ก), etc. \
 Transliterate all local language words into English characters. \
 Example: write "Selam" not "ሰላም", write "Namaste" not "नमस्ते", write "Marhaba" not "مرحبا".
+- ALL sections (hook, body, cta, fallback_1, fallback_2, polite_closure) MUST be in the SAME language as the main script. \
+Never write fallbacks or closure in English when the script is in Hindi or another local language.
 - When the product brief includes "Shortcode/CTA (MUST use this EXACTLY...)", the cta, fallback_1, and fallback_2 MUST repeat that exact instruction (same words, same numbers/codes). Do not invent a different CTA.
 - When the product brief includes "Pricing (mention in script body)", mention that pricing or value in the script body (e.g. "Only 50 cents a month", "Free for the first month").
 - DTMF instruction must be crystal clear
@@ -161,6 +208,49 @@ def _summarize_market(market_analysis: dict[str, Any]) -> str:
         if pains:
             parts.append(f"Pain points: {', '.join(pains[:3])}")
     return "\n".join(parts)
+
+
+# Language-aware fallback defaults so non-English scripts don't get English fallbacks
+_FALLBACK_BY_LANG: dict[str, tuple[str, str, str]] = {
+    # (fallback_1, fallback_2, polite_closure)
+    "hindi":    ("[urgent] Yeh mauka mat chhodiye... abhi Press 1 karein.", "[gentle] Hazaaron log already enjoy kar rahe hain... aap bhi Press 1 karein.", "[warm] Dhanyavaad, aapka din shubh ho."),
+    "hinglish": ("[urgent] Yeh mauka mat chhodiye... abhi Press 1 karein.", "[gentle] Hazaaron log already enjoy kar rahe hain... aap bhi Press 1 karein.", "[warm] Dhanyavaad, aapka din shubh ho."),
+    "swahili":  ("[urgent] Usikose fursa hii... bonyeza 1 sasa.", "[gentle] Maelfu tayari wanafurahia... bonyeza 1 sasa.", "[warm] Asante, siku njema."),
+    "kiswahili":("[urgent] Usikose fursa hii... bonyeza 1 sasa.", "[gentle] Maelfu tayari wanafurahia... bonyeza 1 sasa.", "[warm] Asante, siku njema."),
+    "amharic":  ("[urgent] Yihen idil aderagachew... 1 yitebiku.", "[gentle] Beziwochu iyetedsetut new... 1 yitebiku.", "[warm] Ameseginalehu, melikami ken."),
+    "french":   ("[urgent] Ne manquez pas cette offre... appuyez sur 1 maintenant.", "[gentle] Des milliers en profitent deja... appuyez sur 1.", "[warm] Merci, bonne journee."),
+    "portuguese":("[urgent] Nao perca esta oportunidade... pressione 1 agora.", "[gentle] Milhares ja estao aproveitando... pressione 1.", "[warm] Obrigado, tenha um bom dia."),
+    "arabic":   ("[urgent] La tafawwit hadhihi al-fursa... idghat 1 al-aan.", "[gentle] Al-alaaf yastamti'oon bi-hadha... idghat 1.", "[warm] Shukran, yawm sa'eed."),
+    "tamil":    ("[urgent] Idha thavara vidaatheenga... ippo 1 press pannunga.", "[gentle] Aayirakkanakkaanor idha enjoy panraanga... 1 press pannunga.", "[warm] Nandri, nallanal vazhthukkal."),
+    "bengali":  ("[urgent] Ei sujog chharben na... ekhuni 1 press korun.", "[gentle] Hajar hajar lok eita enjoy korche... 1 press korun.", "[warm] Dhonnobad, shubho din."),
+    "telugu":   ("[urgent] Ee avakasham vadulukokandi... ippudu 1 press cheyandi.", "[gentle] Vellamandi idhi enjoy chesthunnaru... 1 press cheyandi.", "[warm] Dhanyavaadalu, subha dinam."),
+}
+
+def _get_language_fallbacks(lang: str | None) -> tuple[str, str]:
+    """Return (fallback_1, fallback_2) in the appropriate language."""
+    if not lang:
+        return (
+            "Don't miss out! Press 1 now to grab this offer!",
+            "Thousands are already enjoying this. Press 1 now!",
+        )
+    lang_lower = lang.lower().strip()
+    for key, (fb1, fb2, _closure) in _FALLBACK_BY_LANG.items():
+        if key in lang_lower or lang_lower in key:
+            return (fb1, fb2)
+    return (
+        "Don't miss out! Press 1 now to grab this offer!",
+        "Thousands are already enjoying this. Press 1 now!",
+    )
+
+def _get_language_closure(lang: str | None) -> str:
+    """Return polite_closure in the appropriate language."""
+    if not lang:
+        return "Thank you for your time. Have a wonderful day!"
+    lang_lower = lang.lower().strip()
+    for key, (_fb1, _fb2, closure) in _FALLBACK_BY_LANG.items():
+        if key in lang_lower or lang_lower in key:
+            return closure
+    return "Thank you for your time. Have a wonderful day!"
 
 
 class ScriptWriterAgent(BaseAgent):
@@ -341,6 +431,7 @@ mention that pricing in the script body. Output valid JSON with "scripts" array 
         body_text = full_parts[1] if n > 1 else ""
         cta_text = full_parts[2] if n > 2 else (full_parts[-1] if n > 1 else "")
         closure_text = full_parts[-1] if n > 0 else "Thank you for your time. Have a wonderful day!"
+        fb1, fb2 = _get_language_fallbacks(language_override)
         return {
             "variant_id": variant_id,
             "theme": theme,
@@ -351,8 +442,8 @@ mention that pricing in the script body. Output valid JSON with "scripts" array 
             "polite_closure": closure_text,
             "full_script": full_script,
             "segments": segment_list,
-            "fallback_1": "Don't miss out! Press 1 now to activate.",
-            "fallback_2": "Last chance! Press 1 now or you may miss this opportunity.",
+            "fallback_1": fb1,
+            "fallback_2": fb2,
             "word_count": len(re.sub(r"\[.*?\]", "", full_script).split()),
             "estimated_duration_seconds": round(len(full_script.split()) / 2.5, 1),
         }
@@ -746,23 +837,29 @@ Return valid JSON with "scripts" array of {count} objects. Each object MUST have
                 logger.warning(f"[{self.name}] Unexpected response structure. Keys: {list(result.keys())}")
             result["scripts"] = []
 
+        lang_used = result.get("language_used") or ""
+
         for i, script in enumerate(result.get("scripts", [])):
             if "variant_id" not in script:
                 script["variant_id"] = i + 1
             if "full_script" not in script and "hook" in script:
                 script["full_script"] = f"{script.get('hook', '')} {script.get('body', '')} {script.get('cta', '')}"
+            # Fallback defaults in the same language as the script
+            script_lang = script.get("language") or lang_used
+            fb1, fb2 = _get_language_fallbacks(script_lang)
             if not script.get("fallback_1"):
-                script["fallback_1"] = (
-                    "Don't miss out! This exclusive offer won't last long. Press 1 now to grab it before it's gone!"
-                )
+                script["fallback_1"] = fb1
             if not script.get("fallback_2"):
-                script["fallback_2"] = (
-                    "Last chance! Thousands are already enjoying this. Press 1 now or you may miss this opportunity."
-                )
+                script["fallback_2"] = fb2
             if not script.get("polite_closure"):
-                script["polite_closure"] = (
-                    "Thank you for your time. Have a wonderful day!"
-                )
+                script["polite_closure"] = _get_language_closure(script_lang)
+            # Ensure word_count is always present
+            if not script.get("word_count"):
+                full_text = script.get("full_script", "")
+                clean_text = re.sub(r"\[.*?\]", "", full_text)
+                wc = len(clean_text.split())
+                script["word_count"] = wc
+                script["estimated_duration_seconds"] = round(wc / 2.5, 1)
 
         return result
 
@@ -781,3 +878,86 @@ Return valid JSON with "scripts" array of {count} objects. Each object MUST have
                     f"[{self.name}] Script variant {script.get('variant_id')} "
                     f"exceeds word limit: {word_count} words"
                 )
+
+        self._clean_scripts(result)
+
+    @staticmethod
+    def _clean_scripts(result: dict[str, Any]) -> None:
+        """Post-process scripts to remove formal greetings, honorifics, and fix issues.
+
+        The LLM stubbornly inserts formal greetings in multiple languages despite
+        prompt instructions. This method enforces clean hooks at the code level.
+        """
+        # Formal AND casual greeting words/phrases to strip from the START of hooks/full_script
+        _GREETING_PATTERN = re.compile(
+            r"^(\s*(?:\[[^\]]*\]\s*)*)"  # Capture leading emotion tags
+            r"(?:"
+            # English formal greetings
+            r"(?:Dear\s+)?(?:Madam|Sir|Madam\s*/?\s*Sir|Sir\s*/?\s*Madam|Madam\s+or\s+Sir|Sir\s+or\s+Madam)"
+            r"|(?:Dear\s+(?:subscriber|listener|user|customer|friend))"
+            r"|Welcome\s+(?:sir|madam|bwana|mama|dada)"
+            # English casual greetings
+            r"|(?:Hey\s+(?:there|friend|buddy|folks|everyone))"
+            r"|(?:Hello\s+(?:there|friend|everyone|folks))"
+            r"|(?:Hi\s+(?:there|friend|everyone|folks))"
+            # Hindi/Urdu greetings
+            r"|(?:Namaste|Namaskar|Pranam)\s*(?:ji)?"
+            r"|(?:Arre\s+(?:bhai|dost|yaar))"
+            # Swahili greetings and honorifics
+            r"|(?:Mambo\s+(?:rafiki|ndugu|vipi))"
+            r"|(?:Karibu\s+)?(?:bwana|mama|dada|ndugu|kaka|rafiki)"
+            r"|(?:Habari\s+(?:yako|zako|za\s+asubuhi|za\s+jioni))"
+            r"|(?:Shikamoo|Hujambo|Jambo)"
+            r"|(?:Duh|Eeh|Eh)\s+(?:kaka|bwana|mama|dada|ndugu)\s*(?:mkubwa|yangu)?"
+            r"|(?:Sasa|Niaje|Vipi)"
+            # French greetings
+            r"|(?:Cher|Chere)\s+(?:abonne|client|ami)"
+            r"|Bonjour\s+(?:monsieur|madame|cher)"
+            r"|(?:Salut\s+(?:ami|mon\s+ami))"
+            # General patterns
+            r"|(?:Big\s+brother|Big\s+sister|Brother|Sister|Bhai|Didi|Bhaiya)"
+            r"|(?:Good\s+(?:morning|afternoon|evening)\s*(?:friend|sir|madam)?)"
+            r")"
+            r"(?:\s*[,!.…\s])*",
+            re.IGNORECASE,
+        )
+        # Inline formal references anywhere in text
+        _INLINE_FORMAL = re.compile(
+            r"\b(?:"
+            r"Sir\s*/?\s*Madam|Madam\s*/?\s*Sir|Sir\s+or\s+Madam|Madam\s+or\s+Sir"
+            r"|Dear\s+(?:Sir|Madam|subscriber|listener|user|customer)"
+            r"|(?:kaka|bwana|mama|dada)\s+mkubwa"
+            r")\b[,\s]*",
+            re.IGNORECASE,
+        )
+
+        text_fields = ["hook", "body", "cta", "full_script", "fallback_1", "fallback_2", "polite_closure"]
+
+        for script in result.get("scripts", []):
+            for field in text_fields:
+                text = script.get(field, "")
+                if not text or not isinstance(text, str):
+                    continue
+
+                # Strip greeting from start of hook and full_script
+                if field in ("hook", "full_script"):
+                    text = _GREETING_PATTERN.sub(r"\1", text)
+
+                # Strip inline formal references from all fields
+                text = _INLINE_FORMAL.sub("", text)
+
+                # Clean up double spaces and leading punctuation
+                text = re.sub(r"\s{2,}", " ", text).strip()
+                text = re.sub(r"^[,.\s…]+", "", text).strip()
+
+                script[field] = text
+
+            # Rebuild full_script if hook/body/cta were cleaned
+            if script.get("hook") and script.get("body") and script.get("cta"):
+                script["full_script"] = f"{script['hook']} {script['body']} {script['cta']}"
+
+            # Recalculate word count after cleaning
+            full_text = script.get("full_script", "")
+            clean_text = re.sub(r"\[.*?\]", "", full_text)
+            script["word_count"] = len(clean_text.split())
+            script["estimated_duration_seconds"] = round(script["word_count"] / 2.5, 1)

@@ -168,6 +168,7 @@ Output valid JSON.\
             system_prompt=self._resolve_prompt(SYSTEM_PROMPT),
             user_prompt=user_prompt,
             max_tokens=16384,
+            timeout_seconds=240,  # Eval panel needs more time: 10 personas × 5 variants
         )
 
         result = self.parse_json(response)

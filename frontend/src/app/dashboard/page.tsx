@@ -18,6 +18,7 @@ import {
   Pause,
   Languages,
   Copy,
+  Phone,
 } from "lucide-react";
 import StatsCards from "@/components/StatsCards";
 import CommentThread from "@/components/CommentThread";
@@ -566,7 +567,7 @@ export default function DashboardPage() {
                               const stvFormat = (stvResult.audio_format || "mp3") as string;
                               const stvAudioFiles = ((stvResult.audio as Record<string, unknown>)?.audio_files || []) as AudioFile[];
                               const stvSessionId = (stvResult.session_id || detail.result?.session_id || campaign.id) as string;
-                              const engineLabel = stvEngine === "elevenlabs" ? "ElevenLabs" : stvEngine === "murf" ? "Murf AI" : stvEngine === "edge-tts" ? "Edge TTS" : stvEngine;
+                              const engineLabel = stvEngine === "elevenlabs" ? "ElevenLabs" : stvEngine === "edge-tts" ? "Edge TTS" : stvEngine;
 
                               return (
                                 <div className="space-y-4">
@@ -707,6 +708,15 @@ export default function DashboardPage() {
                                       {regeneratingAudioCampaignId === campaign.id && regeneratingAudioVariantId === null ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Mic2 className="w-2.5 h-2.5" />}
                                       {regeneratingAudioCampaignId === campaign.id && regeneratingAudioVariantId === null ? "Regenerating all…" : "Regenerate all audio"}
                                     </button>
+                                    {campaign.has_audio && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); router.push(`/call-simulator?campaign=${campaign.id}`); }}
+                                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-emerald-500 hover:bg-emerald-500/10 border border-emerald-500/30 transition-colors"
+                                      >
+                                        <Phone className="w-2.5 h-2.5" />
+                                        Test Call
+                                      </button>
+                                    )}
                                     <a
                                       href={`/api/sessions/${campaign.id}/scripts?fmt=text`}
                                       target="_blank"
@@ -737,6 +747,7 @@ export default function DashboardPage() {
                                   const vid = script.variant_id || idx + 1;
                                   const variantAudio = audioByVariant[vid] || [];
                                   const audioSessionId = detail?.result?.audio?.session_id || detail?.result?.session_id || "";
+                                  const campaignAudioFormat = (detail?.result?.audio_format || detail?.result?.audio?.audio_format || "mp3") as string;
                                   const isEditing = editingCampaignId === campaign.id && editedScripts;
 
                                   return (
@@ -811,10 +822,28 @@ export default function DashboardPage() {
                                             onChange={(e) => {
                                               const next = [...(editedScripts || [])];
                                               if (next[idx]) {
-                                                next[idx] = { ...next[idx], full_script: e.target.value };
+                                                const updated = { ...next[idx], full_script: e.target.value };
+                                                // Sync segments if this is a flow-based script so
+                                                // regeneration still produces separate audio per segment
+                                                if (Array.isArray(updated.segments) && updated.segments.length > 0) {
+                                                  const segTexts = (updated.segments as { step_id: string; text: string }[]);
+                                                  const newFullText = e.target.value.trim();
+                                                  // Distribute edited text back into segments proportionally
+                                                  const oldJoined = segTexts.map((s) => s.text).join(" ").trim();
+                                                  if (newFullText !== oldJoined) {
+                                                    // Update each segment's text from the full_script by splitting
+                                                    // at the same rough boundaries, or put all text in first segment
+                                                    // if structure can't be preserved
+                                                    updated.segments = segTexts.map((s, i) => ({
+                                                      ...s,
+                                                      text: i === 0 ? newFullText : "",
+                                                    }));
+                                                  }
+                                                }
                                                 const parts = e.target.value.trim().split(/\s+/).filter(Boolean);
-                                                next[idx].word_count = parts.length;
-                                                next[idx].estimated_duration_seconds = Math.round(parts.length / 2.5 * 10) / 10;
+                                                updated.word_count = parts.length;
+                                                updated.estimated_duration_seconds = Math.round(parts.length / 2.5 * 10) / 10;
+                                                next[idx] = updated;
                                                 setEditedScripts(next);
                                               }
                                             }}
@@ -888,7 +917,7 @@ export default function DashboardPage() {
                                                 {label}
                                               </button>
                                               <button
-                                                onClick={() => forceDownload(audioUrl, af.file_name || "audio.mp3")}
+                                                onClick={() => forceDownload(audioUrl, af.file_name || `audio.${campaignAudioFormat}`)}
                                                 className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
                                               >
                                                 <Download className="w-2.5 h-2.5" />
@@ -968,10 +997,6 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Activity Feed */}
-            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)]">
-              <ActivityFeed events={activityEvents} maxItems={15} />
-            </div>
           </div>
         </div>
       </div>

@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OBD SuperStar Agent — Project Showcase</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #06080d;
+    --bg-card: rgba(16, 22, 36, 0.7);
+    --bg-card-hover: rgba(22, 30, 48, 0.85);
+    --green: #00e676;
+    --green-dim: #00c853;
+    --green-glow: rgba(0, 230, 118, 0.15);
+    --green-glow-strong: rgba(0, 230, 118, 0.3);
+    --accent: #4fc3f7;
+    --accent-dim: #29b6f6;
+    --text: #e8ecf1;
+    --text-dim: #8a95a8;
+    --text-muted: #505a6b;
+    --border: rgba(255,255,255,0.06);
+    --border-hover: rgba(0, 230, 118, 0.2);
+    --radius: 16px;
+    --radius-sm: 10px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ─── Background Effects ─── */
+  .bg-grid {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+  .bg-glow-1 {
+    position: fixed; top: -200px; left: -200px; width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(0,230,118,0.08), transparent 70%);
+    z-index: 0; pointer-events: none; animation: drift1 20s ease-in-out infinite;
+  }
+  .bg-glow-2 {
+    position: fixed; bottom: -300px; right: -200px; width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(79,195,247,0.06), transparent 70%);
+    z-index: 0; pointer-events: none; animation: drift2 25s ease-in-out infinite;
+  }
+  @keyframes drift1 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(80px,120px)} }
+  @keyframes drift2 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-60px,-80px)} }
+
+  /* ─── Layout ─── */
+  .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* ─── Navigation ─── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    background: rgba(6,8,13,0.75);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .container {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .nav-brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+  .nav-logo {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, #000 40%, var(--green));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; color: var(--green);
+    box-shadow: 0 0 20px rgba(0,230,118,0.2);
+  }
+  .nav-title { font-weight: 700; font-size: 16px; color: var(--text); }
+  .nav-title span { color: var(--green); }
+  .nav-links { display: flex; gap: 8px; }
+  .nav-links a {
+    color: var(--text-dim); text-decoration: none; font-size: 13px; font-weight: 500;
+    padding: 6px 14px; border-radius: 8px; transition: all 0.2s;
+  }
+  .nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+
+  /* ─── Hero ─── */
+  .hero {
+    padding: 160px 0 100px; text-align: center;
+    position: relative;
+  }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 16px 6px 8px; border-radius: 100px;
+    background: rgba(0,230,118,0.08); border: 1px solid rgba(0,230,118,0.15);
+    font-size: 12px; font-weight: 600; color: var(--green);
+    margin-bottom: 32px; letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .hero-badge .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,230,118,0.4)} 50%{opacity:0.7;box-shadow:0 0 0 6px rgba(0,230,118,0)} }
+
+  .hero h1 {
+    font-size: clamp(42px, 6vw, 72px); font-weight: 900; line-height: 1.05;
+    letter-spacing: -2px; margin-bottom: 24px;
+  }
+  .hero h1 .gradient {
+    background: linear-gradient(135deg, var(--green), var(--accent), var(--green));
+    background-size: 200% 200%;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-shift 6s ease infinite;
+  }
+  @keyframes gradient-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+
+  .hero p {
+    font-size: 18px; color: var(--text-dim); max-width: 640px; margin: 0 auto 40px;
+    line-height: 1.7;
+  }
+  .hero-stats {
+    display: flex; justify-content: center; gap: 48px; flex-wrap: wrap;
+    margin-top: 48px;
+  }
+  .hero-stat { text-align: center; }
+  .hero-stat .num {
+    font-size: 36px; font-weight: 800; color: var(--green);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .hero-stat .label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+  /* ─── Sections ─── */
+  section { padding: 80px 0; }
+  .section-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--green); margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -1px;
+    margin-bottom: 16px;
+  }
+  .section-desc { color: var(--text-dim); max-width: 600px; margin-bottom: 48px; font-size: 16px; }
+
+  /* ─── Cards ─── */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+  }
+  .card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 40px rgba(0,230,118,0.06);
+  }
+
+  /* ─── Architecture ─── */
+  .arch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .arch-card { position: relative; overflow: hidden; }
+  .arch-card .icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; margin-bottom: 16px;
+  }
+  .arch-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .arch-card p { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+  .arch-card .tag {
+    display: inline-block; margin-top: 12px; padding: 3px 10px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+  }
+  .icon-fe { background: linear-gradient(135deg, rgba(79,195,247,0.15), rgba(79,195,247,0.05)); }
+  .icon-be { background: linear-gradient(135deg, rgba(0,230,118,0.15), rgba(0,230,118,0.05)); }
+  .icon-ai { background: linear-gradient(135deg, rgba(171,71,188,0.15), rgba(171,71,188,0.05)); }
+  .icon-db { background: linear-gradient(135deg, rgba(255,183,77,0.15), rgba(255,183,77,0.05)); }
+  .tag-fe { background: rgba(79,195,247,0.1); color: var(--accent); }
+  .tag-be { background: rgba(0,230,118,0.1); color: var(--green); }
+  .tag-ai { background: rgba(171,71,188,0.1); color: #ce93d8; }
+  .tag-db { background: rgba(255,183,77,0.1); color: #ffb74d; }
+
+  /* ─── Pipeline ─── */
+  .pipeline {
+    display: flex; flex-direction: column; gap: 0; position: relative;
+    padding-left: 32px;
+  }
+  .pipeline::before {
+    content: ''; position: absolute; left: 15px; top: 24px; bottom: 24px;
+    width: 2px; background: linear-gradient(to bottom, var(--green), var(--accent), var(--green));
+    opacity: 0.3;
+  }
+  .pipeline-step {
+    display: flex; align-items: flex-start; gap: 20px;
+    padding: 20px 0; position: relative;
+  }
+  .pipeline-dot {
+    position: absolute; left: -24px; top: 26px;
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--green); background: var(--bg);
+    z-index: 2; transition: all 0.3s;
+  }
+  .pipeline-step:hover .pipeline-dot {
+    background: var(--green); box-shadow: 0 0 12px rgba(0,230,118,0.5);
+  }
+  .pipeline-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    font-weight: 700; color: var(--green); opacity: 0.5;
+    min-width: 24px; padding-top: 2px;
+  }
+  .pipeline-content { flex: 1; }
+  .pipeline-content h4 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .pipeline-content p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .pipeline-badge {
+    display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+    background: rgba(0,230,118,0.08); color: var(--green); letter-spacing: 0.5px;
+  }
+
+  /* ─── Audio Engine ─── */
+  .audio-engines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .engine-card { text-align: center; padding: 32px 20px; }
+  .engine-card .rank {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-muted); margin-bottom: 12px; letter-spacing: 1px;
+  }
+  .engine-card .name { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+  .engine-card .desc { font-size: 13px; color: var(--text-dim); }
+  .engine-card .highlight {
+    margin-top: 16px; padding: 4px 12px; border-radius: 6px;
+    display: inline-block; font-size: 11px; font-weight: 600;
+  }
+  .engine-1 .name { color: var(--green); }
+  .engine-1 .highlight { background: rgba(0,230,118,0.1); color: var(--green); }
+  .engine-2 .name { color: var(--accent); }
+  .engine-2 .highlight { background: rgba(79,195,247,0.1); color: var(--accent); }
+  .engine-3 .name { color: #ffb74d; }
+  .engine-3 .highlight { background: rgba(255,183,77,0.1); color: #ffb74d; }
+
+  /* ─── Features Grid ─── */
+  .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .feature-card .emoji { font-size: 28px; margin-bottom: 14px; }
+  .feature-card h4 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .feature-card p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+
+  /* ─── Market Coverage ─── */
+  .markets-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .market-region h3 {
+    font-size: 14px; font-weight: 700; color: var(--green); margin-bottom: 16px;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .market-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .market-pill {
+    padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .market-pill:hover { border-color: var(--border-hover); background: var(--green-glow); }
+
+  /* ─── Tech Stack ─── */
+  .tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .tech-item {
+    display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+    border-radius: var(--radius-sm); background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border); transition: all 0.2s;
+  }
+  .tech-item:hover { border-color: var(--border-hover); }
+  .tech-icon { font-size: 20px; width: 28px; text-align: center; }
+  .tech-name { font-size: 13px; font-weight: 600; }
+  .tech-role { font-size: 10px; color: var(--text-muted); }
+
+  /* ─── Code Block ─── */
+  .code-block {
+    background: rgba(0,0,0,0.4); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.8;
+    color: var(--text-dim);
+  }
+  .code-block .comment { color: var(--text-muted); }
+  .code-block .keyword { color: var(--accent); }
+  .code-block .string { color: var(--green); }
+  .code-block .func { color: #ce93d8; }
+  .code-block .num { color: #ffb74d; }
+
+  /* ─── Diagram ─── */
+  .diagram-box {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 40px; text-align: center;
+    margin: 32px 0;
+  }
+  .diagram-flow {
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .diagram-node {
+    padding: 12px 20px; border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 600; white-space: nowrap;
+  }
+  .diagram-arrow { color: var(--text-muted); font-size: 18px; }
+  .node-fe { background: rgba(79,195,247,0.1); color: var(--accent); border: 1px solid rgba(79,195,247,0.2); }
+  .node-be { background: rgba(0,230,118,0.1); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+  .node-ai { background: rgba(171,71,188,0.1); color: #ce93d8; border: 1px solid rgba(171,71,188,0.2); }
+  .node-db { background: rgba(255,183,77,0.1); color: #ffb74d; border: 1px solid rgba(255,183,77,0.2); }
+  .node-tts { background: rgba(239,83,80,0.1); color: #ef5350; border: 1px solid rgba(239,83,80,0.2); }
+
+  /* ─── Eval Panel ─── */
+  .eval-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .eval-persona {
+    padding: 16px 12px; text-align: center; border-radius: var(--radius-sm);
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    transition: all 0.3s;
+  }
+  .eval-persona:hover { border-color: var(--border-hover); transform: translateY(-2px); }
+  .eval-persona .avatar { font-size: 24px; margin-bottom: 8px; }
+  .eval-persona .role { font-size: 11px; font-weight: 600; line-height: 1.4; }
+
+  /* ─── Separator ─── */
+  .sep {
+    height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 0;
+  }
+
+  /* ─── Footer ─── */
+  footer {
+    padding: 60px 0 40px; text-align: center;
+    border-top: 1px solid var(--border);
+  }
+  footer .brand { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+  footer .brand span { color: var(--green); }
+  footer .tagline { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
+  footer .links { display: flex; justify-content: center; gap: 24px; }
+  footer .links a {
+    color: var(--text-dim); text-decoration: none; font-size: 13px;
+    transition: color 0.2s;
+  }
+  footer .links a:hover { color: var(--green); }
+  footer .copy { margin-top: 32px; font-size: 11px; color: var(--text-muted); }
+
+  /* ─── Scroll Animations ─── */
+  .reveal {
+    opacity: 0; transform: translateY(30px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 900px) {
+    .arch-grid, .markets-wrap { grid-template-columns: 1fr; }
+    .audio-engines { grid-template-columns: 1fr; }
+    .features-grid { grid-template-columns: 1fr 1fr; }
+    .eval-grid { grid-template-columns: repeat(3, 1fr); }
+    .hero-stats { gap: 32px; }
+    .nav-links { display: none; }
+  }
+  @media (max-width: 600px) {
+    .features-grid, .eval-grid { grid-template-columns: 1fr 1fr; }
+    .diagram-flow { flex-direction: column; }
+    .diagram-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-glow-1"></div>
+<div class="bg-glow-2"></div>
+
+<!-- ─── NAV ─── -->
+<nav>
+  <div class="container">
+    <a href="#" class="nav-brand">
+      <div class="nav-logo">B</div>
+      <div class="nav-title">black<span>N</span>green</div>
+    </a>
+    <div class="nav-links">
+      <a href="#architecture">Architecture</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#audio">Audio</a>
+      <a href="#features">Features</a>
+      <a href="#markets">Markets</a>
+      <a href="#tech">Tech Stack</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── HERO ─── -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge"><div class="dot"></div> AI-Powered Campaign Production</div>
+    <h1>
+      <span class="gradient">OBD SuperStar</span><br>Agent
+    </h1>
+    <p>From product brief to broadcast-ready audio in minutes. AI agents write culturally-tuned telecom scripts, an expert panel evaluates them, and a multi-engine TTS system produces campaign-ready audio across Africa &amp; South Asia.</p>
+
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="num">6</div>
+        <div class="label">AI Agents</div>
+      </div>
+      <div class="hero-stat">
+        <div class="num">5</div>
+        <div class="label">Script Variants</div>
+      </div>
+      <div class="hero-stat">
+        <div class="num">25+</div>
+        <div class="label">Countries</div>
+      </div>
+      <div class="hero-stat">
+        <div class="num">3</div>
+        <div class="label">TTS Engines</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── ARCHITECTURE ─── -->
+<section id="architecture">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">System Design</div>
+      <div class="section-title">Architecture</div>
+      <div class="section-desc">A Next.js frontend talks to a FastAPI backend that orchestrates Azure OpenAI agents and multi-engine TTS, persisting to Supabase or SQLite.</div>
+    </div>
+
+    <div class="diagram-box reveal">
+      <div class="diagram-flow">
+        <div class="diagram-node node-fe">Next.js 15 UI</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="diagram-node node-be">FastAPI Backend</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="diagram-node node-ai">Azure OpenAI</div>
+      </div>
+      <div style="margin-top: 16px;"></div>
+      <div class="diagram-flow">
+        <div class="diagram-node node-be">FastAPI Backend</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="diagram-node node-tts">ElevenLabs / Murf / Edge TTS</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="diagram-node node-db">Supabase / SQLite</div>
+      </div>
+    </div>
+
+    <div class="arch-grid reveal">
+      <div class="card arch-card">
+        <div class="icon icon-fe">&#9881;</div>
+        <h3>Frontend</h3>
+        <p>Next.js 15, React 19, Tailwind CSS with 6 glassmorphism themes. Campaign wizard, dashboard, script-to-voice, admin panel. WebSocket real-time progress &amp; collaboration.</p>
+        <span class="tag tag-fe">React 19 + Tailwind</span>
+      </div>
+      <div class="card arch-card">
+        <div class="icon icon-be">&#9889;</div>
+        <h3>Backend</h3>
+        <p>FastAPI with Uvicorn. REST + WebSocket endpoints, async pipeline orchestration, JWT auth, session management, background audio jobs, file serving.</p>
+        <span class="tag tag-be">Python + FastAPI</span>
+      </div>
+      <div class="card arch-card">
+        <div class="icon icon-ai">&#10024;</div>
+        <h3>AI Agents</h3>
+        <p>Six specialized agents powered by Azure OpenAI: product analysis, market research, script writing, evaluation panel, voice selection, and audio production.</p>
+        <span class="tag tag-ai">Azure OpenAI GPT</span>
+      </div>
+      <div class="card arch-card">
+        <div class="icon icon-db">&#9731;</div>
+        <h3>Data Layer</h3>
+        <p>Supabase (PostgreSQL) for campaigns, auth, storage CDN. SQLite fallback for local dev. Analysis caching with SHA256 keys. Supabase Storage for audio CDN.</p>
+        <span class="tag tag-db">Supabase + SQLite</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── PIPELINE ─── -->
+<section id="pipeline">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">The Engine</div>
+      <div class="section-title">6-Agent AI Pipeline</div>
+      <div class="section-desc">An orchestrated sequence of specialized AI agents transforms a product document into broadcast-ready campaign assets.</div>
+    </div>
+
+    <div class="pipeline reveal">
+      <div class="pipeline-step">
+        <div class="pipeline-dot"></div>
+        <div class="pipeline-num">01</div>
+        <div class="pipeline-content">
+          <h4>Product Analyzer</h4>
+          <p>Extracts a structured brief from raw product documentation &mdash; features, pricing, CTA shortcodes, audience, USPs. Treats input as data only (injection prevention).</p>
+          <span class="pipeline-badge">AGENT 1 &middot; ~4K TOKENS</span>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-dot"></div>
+        <div class="pipeline-num">02</div>
+        <div class="pipeline-content">
+          <h4>Market Researcher</h4>
+          <p>Deep-dives into the target country, telco, and culture: communication style, taboos, emotional triggers, competitive landscape, best call times. Runs in parallel with Step 1.</p>
+          <span class="pipeline-badge">AGENT 2 &middot; PARALLELIZABLE</span>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-dot"></div>
+        <div class="pipeline-num">03</div>
+        <div class="pipeline-content">
+          <h4>Script Writer</h4>
+          <p>Generates 5 creative variants (curiosity gap, humor, storytelling, FOMO, aspirational). Each with hook, body, CTA, 2 fallbacks, polite closure, and emotion tags like <code>[warm]</code>, <code>[pause]</code>.</p>
+          <span class="pipeline-badge">AGENT 3 &middot; 5 VARIANTS &times; 75 WORDS</span>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-dot"></div>
+        <div class="pipeline-num">04</div>
+        <div class="pipeline-content">
+          <h4>Evaluation Panel</h4>
+          <p>10 expert personas score each variant 1&ndash;10, then consensus-rank them to surface the strongest scripts.</p>
+          <span class="pipeline-badge">AGENT 4 &middot; CONSENSUS RANKING</span>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-dot"></div>
+        <div class="pipeline-num">05</div>
+        <div class="pipeline-content">
+          <h4>Script Writer (Revision)</h4>
+          <p>Rewrites all variants incorporating the evaluation panel's critical feedback and revision instructions. Configurable rounds (default: 1).</p>
+          <span class="pipeline-badge">FEEDBACK LOOP &middot; CONFIGURABLE ROUNDS</span>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="pipeline-dot"></div>
+        <div class="pipeline-num">06</div>
+        <div class="pipeline-content">
+          <h4>Voice Selector + Audio Producer</h4>
+          <p>Selects region-appropriate voices from 18+ curated ElevenLabs voices. Generates hook previews (3 voices per variant). User picks favorites, then triggers full audio with BGM mixing.</p>
+          <span class="pipeline-badge">AGENT 6+7 &middot; TWO-PHASE AUDIO</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── EVALUATION PANEL ─── -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">Quality Assurance</div>
+      <div class="section-title">Evaluation Agent</div>
+      <div class="section-desc">One of 6 pipeline agents. Scores every script variant through 10 expert personas using consensus ranking to ensure broadcast quality.</div>
+    </div>
+    <div class="eval-grid reveal" style="grid-template-columns: 1fr; max-width: 700px; margin: 0 auto;">
+      <div class="eval-persona" style="display: flex; align-items: center; gap: 18px; padding: 24px 32px; text-align: left;">
+        <div class="avatar" style="font-size: 32px; margin-bottom: 0;">&#127919;</div>
+        <div>
+          <div class="role" style="font-size: 14px; margin-bottom: 6px;">10 Personas &middot; Consensus Ranking</div>
+          <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">Radio Jingle Writer &bull; Consumer Psychologist &bull; Behavioral Economist &bull; Direct Response Copywriter &bull; Brand Storyteller &bull; Local Market Expert &bull; Persuasion Specialist &bull; Telco Marketing Director &bull; Voice UX Designer &bull; Cultural Consultant</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── AUDIO ─── -->
+<section id="audio">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">Sound Production</div>
+      <div class="section-title">3-Engine Audio System</div>
+      <div class="section-desc">A cascading TTS architecture with automatic fallback ensures audio generation never fails. Emotion tags, section-based prosody, and BGM mixing produce broadcast-quality output.</div>
+    </div>
+
+    <div class="audio-engines reveal">
+      <div class="card engine-card engine-1">
+        <div class="rank">PRIMARY</div>
+        <div class="name">ElevenLabs</div>
+        <div class="desc">eleven_v3 model, 70+ languages, region-aware voice selection from 18+ curated voices</div>
+        <div class="highlight">Premium Quality</div>
+      </div>
+      <div class="card engine-card engine-2">
+        <div class="rank">SECONDARY</div>
+        <div class="name">Murf AI</div>
+        <div class="desc">Studio quality with pronunciation dictionary, 100K free chars/month</div>
+        <div class="highlight">Studio Grade</div>
+      </div>
+      <div class="card engine-card engine-3">
+        <div class="rank">FALLBACK</div>
+        <div class="name">Edge TTS</div>
+        <div class="desc">Microsoft, unlimited &amp; free, locale-specific voices (en-NG, sw-TZ, hi-IN, etc.)</div>
+        <div class="highlight">Always Available</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 32px;" class="reveal">
+      <div class="code-block">
+<span class="comment">// Audio processing pipeline</span>
+<span class="keyword">clean</span>(script)        <span class="comment">→ Strip [warm], [pause], [laughs] emotion tags</span>
+<span class="keyword">synthesize</span>(voice)   <span class="comment">→ TTS with section-based prosody (rate, pitch)</span>
+<span class="keyword">mix</span>(bgm, -<span class="num">26</span>dB)     <span class="comment">→ Layer background music under voice</span>
+<span class="keyword">export</span>(<span class="string">"mp3"</span>|<span class="string">"wav"</span>) <span class="comment">→ Stereo 320kbps, Supabase CDN upload</span>
+
+<span class="comment">// Per-section prosody (Edge TTS)</span>
+main:      rate <span class="num">-3%</span>, pitch <span class="num">+2Hz</span>   <span class="comment">← slower, warmer</span>
+fallback1: rate <span class="num">+0%</span>, pitch <span class="num">+3Hz</span>   <span class="comment">← brighter, urgent</span>
+fallback2: rate <span class="num">-2%</span>, pitch <span class="num">+1Hz</span>   <span class="comment">← calm, reassuring</span>
+closure:   rate <span class="num">-5%</span>, pitch <span class="num">-1Hz</span>   <span class="comment">← gentle exit</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── FEATURES ─── -->
+<section id="features">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">Capabilities</div>
+      <div class="section-title">Key Features</div>
+    </div>
+
+    <div class="features-grid reveal">
+      <div class="card feature-card">
+        <div class="emoji">&#128640;</div>
+        <h4>Full Campaign Pipeline</h4>
+        <p>Upload product doc, set market, get 5 script variants + expert evaluation + audio &mdash; all in one flow.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#127908;</div>
+        <h4>Script to Voice</h4>
+        <p>Paste any script, pick a country, preview 3 voices, generate final audio with BGM. Voice locking for repeat runs.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#128296;</div>
+        <h4>Flow Configs (IVR)</h4>
+        <p>Multi-step IVR scripts: welcome &rarr; pack details &rarr; double consent &rarr; thanks. One audio file per step.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#128202;</div>
+        <h4>Dashboard</h4>
+        <p>Saved campaigns, play/download audio, edit scripts inline, translate to English, regenerate per-variant or all.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#129309;</div>
+        <h4>Real-Time Collaboration</h4>
+        <p>Comments per campaign, presence indicators, activity feed. WebSocket-powered live updates.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#9881;&#65039;</div>
+        <h4>Admin Panel</h4>
+        <p>Tune pipeline params (word limits, variant count, eval rounds), override agent prompts, manage users &amp; roles.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#128274;</div>
+        <h4>Smart Caching</h4>
+        <p>SHA256-keyed analysis cache. Exact match skips 2 agents, partial match skips 1. Saves time &amp; API cost.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#127912;</div>
+        <h4>6 UI Themes</h4>
+        <p>Light, midnight, ocean, ember, forest, lavender. Glassmorphism design with CSS variable theming.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="emoji">&#128272;</div>
+        <h4>Dual Auth</h4>
+        <p>Supabase JWT with bcrypt + roles (admin/member), or env-based fallback for local dev. 72-hour tokens.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── MARKETS ─── -->
+<section id="markets">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">Global Reach</div>
+      <div class="section-title">Market Coverage</div>
+      <div class="section-desc">Region-aware voice selection, cultural tuning, and locale-specific TTS across 25+ countries.</div>
+    </div>
+
+    <div class="markets-wrap reveal">
+      <div class="market-region">
+        <h3>Africa</h3>
+        <div class="market-list">
+          <div class="market-pill">Nigeria</div>
+          <div class="market-pill">Kenya</div>
+          <div class="market-pill">Tanzania</div>
+          <div class="market-pill">South Africa</div>
+          <div class="market-pill">Ethiopia</div>
+          <div class="market-pill">Ghana</div>
+          <div class="market-pill">Cameroon</div>
+          <div class="market-pill">Uganda</div>
+          <div class="market-pill">Rwanda</div>
+          <div class="market-pill">Zambia</div>
+          <div class="market-pill">Mozambique</div>
+          <div class="market-pill">DRC</div>
+          <div class="market-pill">Senegal</div>
+          <div class="market-pill">C&ocirc;te d'Ivoire</div>
+          <div class="market-pill">Botswana</div>
+        </div>
+      </div>
+      <div class="market-region">
+        <h3>South Asia &amp; Middle East</h3>
+        <div class="market-list">
+          <div class="market-pill">India</div>
+          <div class="market-pill">Bangladesh</div>
+          <div class="market-pill">Pakistan</div>
+          <div class="market-pill">Sri Lanka</div>
+          <div class="market-pill">Nepal</div>
+          <div class="market-pill">UAE</div>
+          <div class="market-pill">Saudi Arabia</div>
+          <div class="market-pill">Egypt</div>
+          <div class="market-pill">Iraq</div>
+          <div class="market-pill">Jordan</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── TECH STACK ─── -->
+<section id="tech">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">Under the Hood</div>
+      <div class="section-title">Tech Stack</div>
+    </div>
+
+    <div class="tech-grid reveal">
+      <div class="tech-item">
+        <div class="tech-icon">&#9883;</div>
+        <div><div class="tech-name">Next.js 15</div><div class="tech-role">Frontend</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#9883;</div>
+        <div><div class="tech-name">React 19</div><div class="tech-role">UI Library</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#127912;</div>
+        <div><div class="tech-name">Tailwind CSS</div><div class="tech-role">Styling</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128013;</div>
+        <div><div class="tech-name">Python</div><div class="tech-role">Backend</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#9889;</div>
+        <div><div class="tech-name">FastAPI</div><div class="tech-role">REST + WS</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#129302;</div>
+        <div><div class="tech-name">Azure OpenAI</div><div class="tech-role">LLM Agents</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#127911;</div>
+        <div><div class="tech-name">ElevenLabs</div><div class="tech-role">Premium TTS</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#127925;</div>
+        <div><div class="tech-name">Murf AI</div><div class="tech-role">Studio TTS</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128483;</div>
+        <div><div class="tech-name">Edge TTS</div><div class="tech-role">Free Fallback</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128154;</div>
+        <div><div class="tech-name">Supabase</div><div class="tech-role">DB + Auth + CDN</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128451;</div>
+        <div><div class="tech-name">SQLite</div><div class="tech-role">Local Fallback</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128011;</div>
+        <div><div class="tech-name">Docker</div><div class="tech-role">Deployment</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128268;</div>
+        <div><div class="tech-name">WebSocket</div><div class="tech-role">Real-time</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128274;</div>
+        <div><div class="tech-name">JWT + bcrypt</div><div class="tech-role">Auth</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#128295;</div>
+        <div><div class="tech-name">TypeScript</div><div class="tech-role">Type Safety</div></div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-icon">&#9881;</div>
+        <div><div class="tech-name">Render</div><div class="tech-role">Hosting</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- ─── REPO MAP ─── -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">Developer Reference</div>
+      <div class="section-title">Repository Map</div>
+    </div>
+    <div class="code-block reveal" style="line-height: 2;">
+OBD_SuperStarAgent/
+<span class="string">  backend/</span>
+    main.py              <span class="comment"># HTTP routes, WebSocket, sessions, jobs</span>
+    orchestrator.py      <span class="comment"># Pipeline order &amp; agent wiring</span>
+    database.py          <span class="comment"># Supabase / SQLite persistence</span>
+    config.py            <span class="comment"># Environment &amp; pipeline defaults</span>
+    auth.py              <span class="comment"># JWT authentication</span>
+<span class="string">    agents/</span>
+      base.py            <span class="comment"># Abstract agent + Azure OpenAI client</span>
+      product_analyzer.py<span class="comment"># Step 1: structured product brief</span>
+      market_researcher.py<span class="comment"># Step 2: culture &amp; market insights</span>
+      script_writer.py   <span class="comment"># Step 3 &amp; 5: script generation + revision</span>
+      eval_panel.py      <span class="comment"># Step 4: 10-persona evaluation</span>
+      voice_selector.py  <span class="comment"># Step 6: region-aware voice picking</span>
+      audio_producer.py  <span class="comment"># Step 7: TTS + BGM mixing</span>
+<span class="string">  frontend/src/</span>
+    app/page.tsx         <span class="comment"># Campaign wizard (main UI)</span>
+    app/dashboard/       <span class="comment"># Saved campaigns, playback, collab</span>
+    app/script-to-voice/ <span class="comment"># Standalone script &rarr; audio tool</span>
+    app/admin/           <span class="comment"># User mgmt, config, prompt overrides</span>
+    app/login/           <span class="comment"># Authentication page</span>
+    app/product/[id]/    <span class="comment"># BNG product campaign templates</span>
+    components/          <span class="comment"># Sidebar, uploads, progress, themes</span>
+    lib/types.ts         <span class="comment"># Shared TypeScript interfaces</span>
+<span class="string">  scripts/</span>
+    restart_app.sh       <span class="comment"># One-command launch</span>
+    seed_flow_configs.py <span class="comment"># Seed IVR flow definitions</span>
+    seed_product_presets.py<span class="comment"># Seed product templates</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FOOTER ─── -->
+<footer>
+  <div class="container">
+    <div class="brand">black<span>N</span>green</div>
+    <div class="tagline">Touching Billions of Lives</div>
+    <div class="links">
+      <a href="#">Documentation</a>
+      <a href="#">Architecture</a>
+      <a href="#">Operations Guide</a>
+      <a href="#">GitHub</a>
+    </div>
+    <div class="copy">&copy; 2024&ndash;2026 blackNgreen &middot; OBD SuperStar Agent</div>
+  </div>
+</footer>
+
+<script>
+  // Scroll reveal animation
+  const reveals = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(el => observer.observe(el));
+
+  // Smooth scroll for nav links
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const target = document.querySelector(a.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>

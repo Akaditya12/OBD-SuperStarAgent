@@ -67,7 +67,7 @@ class BaseAgent(ABC):
         user_prompt: str,
         max_tokens: int = 16384,
         json_output: bool = True,
-        timeout_seconds: int = 120,
+        timeout_seconds: int = 180,
     ) -> str:
         """Call Azure OpenAI and return the response text.
 
