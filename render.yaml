@@ -20,8 +20,6 @@ services:
         sync: false
       - key: ELEVENLABS_API_KEY
         sync: false
-      - key: MURF_API_KEY
-        sync: false
       - key: DEFAULT_LLM_PROVIDER
         value: "azure_openai"
       - key: SUPABASE_URL

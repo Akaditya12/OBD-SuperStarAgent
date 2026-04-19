@@ -115,7 +115,7 @@ export interface AudioFile {
 export interface AudioResult {
   session_id: string;
   session_dir: string;
-  tts_engine?: "elevenlabs" | "edge-tts" | "murf";
+  tts_engine?: "elevenlabs" | "edge-tts";
   voice_used: {
     voice_id: string;
     name: string;
@@ -123,6 +123,7 @@ export interface AudioResult {
   };
   audio_files: AudioFile[];
   failed_files?: AudioFile[];
+  audio_format?: string;
   summary: {
     total_generated: number;
     total_failed: number;
@@ -135,12 +136,14 @@ export interface AudioResult {
 export interface VoicePoolEntry {
   voice_index: number;
   voice_label: string;
+  el_voice_id?: string;
+  edge_voice?: string;
 }
 
 export interface HookPreviewResult {
   session_id: string;
   session_dir: string;
-  tts_engine?: "elevenlabs" | "edge-tts" | "murf";
+  tts_engine?: "elevenlabs" | "edge-tts";
   voice_pool: VoicePoolEntry[];
   hook_previews: AudioFile[];
   failed_previews?: AudioFile[];
@@ -162,12 +165,13 @@ export interface PipelineResult {
   voice_selection?: VoiceSelection;
   hook_previews?: HookPreviewResult;
   audio?: AudioResult;
+  audio_format?: string;
   error?: string;
 }
 
 export interface WsProgressMessage {
   agent: string;
-  status: "started" | "completed" | "error" | "done" | "skipped";
+  status: "started" | "completed" | "error" | "done" | "skipped" | "waiting";
   message: string;
   data?: Record<string, unknown>;
   session_id?: string;

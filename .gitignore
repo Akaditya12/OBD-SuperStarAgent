@@ -33,3 +33,7 @@ bkp.txty
 *.swp
 *.swo
 .DS_Store
+
+# Local dev logs and test artifacts
+*.log
+zambia_ivr.wav

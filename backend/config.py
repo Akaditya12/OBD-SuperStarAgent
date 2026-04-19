@@ -69,9 +69,6 @@ def elevenlabs_401_is_tts_only(response_text: str) -> bool:
         return False
 
 
-# --- Murf AI Configuration ---
-MURF_API_KEY = _env("MURF_API_KEY")
-
 # --- App Configuration ---
 OUTPUTS_DIR = Path(__file__).parent / "outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)
