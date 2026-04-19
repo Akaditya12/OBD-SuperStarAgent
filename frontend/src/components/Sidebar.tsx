@@ -34,7 +34,9 @@ import BNGLogo from "./BNGLogo";
 const NAV_ITEMS = [
     { href: "/", label: "Home", icon: Home },
     { href: "/script-to-voice", label: "Script to Voice", icon: AudioLines },
+    { href: "/voice-library", label: "Voice Library", icon: Mic2 },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/call-simulator", label: "Call Simulator", icon: Phone },
 ];
 
 const ADMIN_NAV_ITEM = { href: "/admin", label: "Admin Panel", icon: Shield };
@@ -52,8 +54,7 @@ const BNG_PRODUCT_LIST = [
     { id: "smartconnect", label: "SmartConnect AI", icon: Radio },
     { id: "callsignature", label: "Call Signature", icon: Shield },
     { id: "magicvoice", label: "Magic Voice", icon: Mic2 },
-    { id: "magiccall", label: "Magic Call App", icon: Phone },
-    { id: "dreamtravel", label: "DreamTravel", icon: Plane },
+{ id: "dreamtravel", label: "DreamTravel", icon: Plane },
     { id: "mobibattle", label: "MobiBattle", icon: Gamepad2 },
     { id: "swipenwin", label: "SwipeNWin", icon: BookOpen },
     { id: "islamicportal", label: "Islamic Portal", icon: Moon },

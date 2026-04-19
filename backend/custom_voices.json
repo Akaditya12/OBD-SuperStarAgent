@@ -1,0 +1,67 @@
+[
+  {
+    "voice_id": "0UZ29F1kNDvmelKG8QCM",
+    "name": "raqib",
+    "description": "",
+    "labels": {
+      "accent": "Indian",
+      "gender": "male",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": null,
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "Ms9OTvWb99V6DwRHZn6q",
+    "name": "Monika sargam",
+    "description": "Friendly Automobile Customer Care Agent - This voice is ideal for vehicle support, service follow-ups, and customer interaction flows.",
+    "labels": {
+      "accent": "Indian",
+      "gender": "female",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": "/api/voice-preview/Ms9OTvWb99V6DwRHZn6q.mp3",
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "hqFZL8ZnNxQK2qFcuxRL",
+    "name": "Asiri",
+    "description": "Gentle, Romantic.",
+    "labels": {
+      "accent": "Indian",
+      "gender": "female",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": null,
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "mBUB5zYuPwfVE6DTcEjf",
+    "name": "Eda Atlas",
+    "description": "Young Female Promotional.",
+    "labels": {
+      "accent": "African",
+      "gender": "female",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": null,
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "LWFgMHXb8m0uANBUpzlq",
+    "name": "Priya",
+    "description": "",
+    "labels": {
+      "accent": "",
+      "gender": "female",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": null,
+    "best_for_regions": []
+  }
+]

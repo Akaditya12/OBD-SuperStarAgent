@@ -52,14 +52,12 @@ function SettingBar({
 }
 
 function getEngineLabel(engine?: string): string {
-  if (engine === "murf") return "Murf AI (Gen2)";
   if (engine === "edge-tts") return "edge-tts (Free)";
   if (engine === "elevenlabs") return "ElevenLabs";
   return "Auto";
 }
 
 function getEngineBadgeClass(engine?: string): string {
-  if (engine === "murf") return "bg-orange-500/10 text-orange-600 border border-orange-500/20";
   if (engine === "edge-tts") return "bg-green-500/10 text-green-600 border border-green-500/20";
   if (engine === "elevenlabs") return "bg-purple-500/10 text-purple-600 border border-purple-500/20";
   return "bg-gray-500/10 text-gray-600 border border-gray-500/20";
@@ -81,13 +79,13 @@ function getVoiceRationale(
 
   if (voiceIdx === 0) {
     // Only show LLM rationale (e.g. "Dorothy for Ghana") when the actual voice matches
-    // the Voice Selector's choice. For Murf/Edge the pool has different names (Arohi, Esi, etc.).
+    // the Voice Selector's choice. For Edge TTS the pool has different names (Esi, etc.).
     const nameMatches = selectedName && poolNameClean && (selectedName.includes(poolNameClean) || poolNameClean.includes(selectedName));
     const isElevenLabs = actualEngine === "elevenlabs";
     if (voiceSelection?.rationale && (isElevenLabs || nameMatches)) {
       return voiceSelection.rationale;
     }
-    const engineLabel = actualEngine === "murf" ? "Murf AI" : actualEngine === "edge-tts" ? "Edge TTS" : "";
+    const engineLabel = actualEngine === "edge-tts" ? "Edge TTS" : "";
     if (engineLabel) {
       const gender = (poolVoice?.voice_label || "").toLowerCase().includes("female") ? "Female" : (poolVoice?.voice_label || "").toLowerCase().includes("male") ? "Male" : "";
       return `${voiceName} — regional voice from the ${engineLabel} pool for this market.${gender ? ` ${gender} voice.` : ""}`.trim();
@@ -143,27 +141,30 @@ export default function VoiceInfoPanel({
   const currentVoiceName = currentPoolVoice?.voice_label || voiceSelection?.selected_voice?.name || "Voice";
 
   const selectedVoice = voiceSelection?.selected_voice;
-  const modelId = voiceSelection?.elevenlabs_api_params?.model_id || "";
-  const voiceId = currentPoolVoice?.el_voice_id || selectedVoice?.voice_id || "";
+  const modelId = actualEngine === "edge-tts" ? "Edge TTS" : (voiceSelection?.elevenlabs_api_params?.model_id || "");
+  const voiceId = currentPoolVoice?.el_voice_id || currentPoolVoice?.edge_voice || selectedVoice?.voice_id || "";
 
   const rationale = getVoiceRationale(activeVoiceIdx, voiceSelection, voicePool, actualEngine);
 
-  const genderLabel = (() => {
-    if (activeVoiceIdx === 0) return selectedVoice?.gender || "";
-    const lbl = currentVoiceName.toLowerCase();
-    if (lbl.includes("female")) return "Female";
-    if (lbl.includes("male")) return "Male";
-    return "";
+  // Parse gender and accent from voice label format: "Name (Gender, Region)" or from selectedVoice
+  const { parsedGender, parsedAccent } = (() => {
+    // For voice 0, prefer data from voiceSelection
+    if (activeVoiceIdx === 0 && selectedVoice) {
+      return { parsedGender: selectedVoice.gender || "", parsedAccent: selectedVoice.accent || "" };
+    }
+    // Parse from label: "Jessica (Female, South Asian)" or "Charlie (Male, South Asian)"
+    const label = currentVoiceName || "";
+    const match = label.match(/\(([^)]+)\)/);
+    if (match) {
+      const parts = match[1].split(",").map((s) => s.trim());
+      const g = parts.find((p) => /^(female|male|neutral)$/i.test(p)) || "";
+      const a = parts.find((p) => !/^(female|male|neutral)$/i.test(p)) || "";
+      return { parsedGender: g, parsedAccent: a };
+    }
+    return { parsedGender: "", parsedAccent: "" };
   })();
-
-  const accentLabel = (() => {
-    if (activeVoiceIdx === 0) return selectedVoice?.accent || "";
-    const lbl = currentVoiceName.toLowerCase();
-    if (lbl.includes("british")) return "British";
-    if (lbl.includes("neutral")) return "Neutral";
-    if (lbl.includes("american")) return "American";
-    return "";
-  })();
+  const genderLabel = parsedGender;
+  const accentLabel = parsedAccent;
 
   return (
     <div className="space-y-4">

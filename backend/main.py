@@ -148,6 +148,7 @@ class PipelineState:
     task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
     subscribers: list[WebSocket] = field(default_factory=list)
     step_overrides: dict[str, str] = field(default_factory=dict)
+    script_approval: asyncio.Event = field(default_factory=asyncio.Event)
 
 pipelines: dict[str, PipelineState] = {}
 
@@ -162,6 +163,9 @@ async def _run_pipeline_bg(
     tts_engine: Optional[str] = None,
     force_reanalyze: bool = False,
     flow_config: Optional[dict] = None,
+    preselected_voice_id: Optional[str] = None,
+    preselected_voice_name: Optional[str] = None,
+    companion_voices: bool = True,
 ) -> None:
     """Run the pipeline as a background task, storing progress in state."""
 
@@ -191,6 +195,14 @@ async def _run_pipeline_bg(
             provider=provider,
             on_progress=on_progress,
         )
+        # Build preselected_voice dict if user chose a voice from Voice Library
+        preselected_voice = None
+        if preselected_voice_id:
+            preselected_voice = {
+                "voice_id": preselected_voice_id,
+                "name": preselected_voice_name or "Selected Voice",
+            }
+
         result = await orchestrator.run(
             product_text=product_text,
             country=country,
@@ -200,6 +212,9 @@ async def _run_pipeline_bg(
             force_reanalyze=force_reanalyze,
             flow_config=flow_config,
             get_step_overrides=lambda: state.step_overrides,
+            preselected_voice=preselected_voice,
+            script_approval_event=state.script_approval,
+            skip_hook_previews=bool(preselected_voice and not companion_voices),
         )
         session_id = result.get("session_id", state.session_id)
         result["country"] = country
@@ -285,6 +300,243 @@ async def check_keys(validate: bool = False):
         except Exception:
             out["elevenlabs"] = "check_failed"
     return out
+
+
+# ── Voice Library ──────────────────────────────────────────────────────────────
+
+import time as _time
+
+_voices_cache: dict[str, Any] = {"data": None, "ts": 0}
+_VOICES_CACHE_TTL = 300  # 5 minutes
+
+
+@app.get("/api/voices")
+async def list_voices():
+    """List available ElevenLabs voices with metadata and preview URLs.
+
+    Returns curated fallback list when the ElevenLabs API is unreachable.
+    Results are cached for 5 minutes to avoid excessive API calls.
+    """
+    import httpx
+    from backend.agents.voice_selector import _CURATED_ELEVENLABS_VOICES
+
+    now = _time.time()
+    if _voices_cache["data"] and (now - _voices_cache["ts"]) < _VOICES_CACHE_TTL:
+        return _voices_cache["data"]
+
+    # Build curated lookup for best_for_regions enrichment
+    curated_by_id = {v["voice_id"]: v for v in _CURATED_ELEVENLABS_VOICES}
+
+    # Try ElevenLabs public v1 API (no API key required — returns premade voices with preview URLs)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.elevenlabs.io/v1/voices",
+                timeout=30.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                all_voices = data.get("voices", [])
+                if all_voices:
+                    voices = []
+                    for v in all_voices:
+                        vid = v.get("voice_id", "")
+                        curated = curated_by_id.get(vid, {})
+                        voices.append({
+                            "voice_id": vid,
+                            "name": v.get("name", ""),
+                            "description": v.get("description", ""),
+                            "labels": v.get("labels", {}),
+                            "category": v.get("category", ""),
+                            "preview_url": v.get("preview_url", ""),
+                            "best_for_regions": curated.get("best_for_regions", []),
+                        })
+                    # Append saved custom voices
+                    for cv in _load_custom_voices():
+                        if not any(existing["voice_id"] == cv["voice_id"] for existing in voices):
+                            voices.append(cv)
+                    result = {"voices": voices, "source": "api", "total": len(voices)}
+                    _voices_cache["data"] = result
+                    _voices_cache["ts"] = now
+                    return result
+    except Exception as e:
+        logger.warning("Failed to fetch ElevenLabs voices: %s — using curated list", e)
+
+    # Fallback: curated voices (with preview_url from curated data)
+    voices = []
+    for v in _CURATED_ELEVENLABS_VOICES:
+        voices.append({
+            "voice_id": v["voice_id"],
+            "name": v["name"],
+            "description": v.get("description", ""),
+            "labels": v.get("labels", {}),
+            "category": v.get("category", "premade"),
+            "preview_url": v.get("preview_url"),
+            "best_for_regions": v.get("best_for_regions", []),
+        })
+
+    # Append saved custom voices
+    for v in _load_custom_voices():
+        # Avoid duplicates (custom voice might match an API/curated voice)
+        if not any(existing["voice_id"] == v["voice_id"] for existing in voices):
+            voices.append(v)
+
+    result = {"voices": voices, "source": "curated", "total": len(voices)}
+    _voices_cache["data"] = result
+    _voices_cache["ts"] = now
+    return result
+
+
+# Persistent custom voices (saved to a JSON file so they survive restarts)
+import json as _json
+_CUSTOM_VOICES_PATH = Path(__file__).parent / "custom_voices.json"
+
+
+def _load_custom_voices() -> list[dict[str, Any]]:
+    try:
+        if _CUSTOM_VOICES_PATH.exists():
+            return _json.loads(_CUSTOM_VOICES_PATH.read_text())
+    except Exception:
+        pass
+    return []
+
+
+def _save_custom_voices(voices: list[dict[str, Any]]) -> None:
+    _CUSTOM_VOICES_PATH.write_text(_json.dumps(voices, indent=2))
+
+
+@app.post("/api/voices/test")
+async def test_custom_voice(request: Request):
+    """Test a custom ElevenLabs voice ID by generating a short audio sample.
+
+    Returns the audio as a base64-encoded MP3 so the frontend can play it instantly.
+    """
+    import httpx
+    import base64
+    from backend.config import ELEVENLABS_API_KEY
+
+    body = await request.json()
+    voice_id = (body.get("voice_id") or "").strip()
+    test_text = body.get("text", "Hello, this is a voice preview from ElevenLabs. How does this sound?")
+
+    if not voice_id:
+        return JSONResponse(status_code=400, content={"error": "voice_id is required"})
+    if not ELEVENLABS_API_KEY:
+        return JSONResponse(status_code=400, content={"error": "No ElevenLabs API key configured"})
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
+                json={"text": test_text, "model_id": "eleven_v3"},
+                timeout=30.0,
+            )
+            if r.status_code == 401:
+                return JSONResponse(status_code=401, content={"error": "ElevenLabs API key invalid"})
+            if r.status_code == 404:
+                return JSONResponse(status_code=404, content={"error": f"Voice ID '{voice_id}' not found"})
+            if r.status_code != 200:
+                return JSONResponse(status_code=r.status_code, content={"error": f"ElevenLabs error: {r.text[:200]}"})
+
+            audio_b64 = base64.b64encode(r.content).decode("ascii")
+            return {
+                "success": True,
+                "voice_id": voice_id,
+                "audio_base64": audio_b64,
+                "audio_size_bytes": len(r.content),
+                "content_type": "audio/mpeg",
+            }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Test failed: {str(e)}"})
+
+
+_VOICE_PREVIEWS_DIR = Path(__file__).parent / "outputs" / "voice_previews"
+_VOICE_PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/api/voices/save")
+async def save_custom_voice(request: Request):
+    """Save a tested custom voice ID permanently to the Voice Library.
+
+    Accepts optional audio_base64 (from the test endpoint) to store as a playable preview.
+    """
+    import base64
+
+    body = await request.json()
+    voice_id = (body.get("voice_id") or "").strip()
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    gender = (body.get("gender") or "").strip()
+    accent = (body.get("accent") or "").strip()
+    audio_b64 = body.get("audio_base64")  # From the test step
+
+    if not voice_id or not name:
+        return JSONResponse(status_code=400, content={"error": "voice_id and name are required"})
+
+    custom_voices = _load_custom_voices()
+
+    # Check for duplicate
+    if any(v["voice_id"] == voice_id for v in custom_voices):
+        return JSONResponse(status_code=409, content={"error": "This voice is already saved"})
+
+    # Save preview audio if provided
+    preview_url = None
+    if audio_b64:
+        try:
+            preview_path = _VOICE_PREVIEWS_DIR / f"{voice_id}.mp3"
+            preview_path.write_bytes(base64.b64decode(audio_b64))
+            preview_url = f"/api/voice-preview/{voice_id}.mp3"
+        except Exception as e:
+            logger.warning("Failed to save voice preview: %s", e)
+
+    custom_voices.append({
+        "voice_id": voice_id,
+        "name": name,
+        "description": description,
+        "labels": {"accent": accent, "gender": gender, "age": ""},
+        "category": "custom",
+        "preview_url": preview_url,
+        "best_for_regions": [],
+    })
+    _save_custom_voices(custom_voices)
+
+    # Invalidate voice cache so the list endpoint includes the new voice
+    _voices_cache["data"] = None
+    _voices_cache["ts"] = 0
+
+    return {"success": True, "voice_id": voice_id, "name": name, "total_custom": len(custom_voices)}
+
+
+@app.get("/api/voice-preview/{filename}")
+async def serve_voice_preview(filename: str):
+    """Serve a saved custom voice preview audio file."""
+    file_path = _VOICE_PREVIEWS_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        return JSONResponse(status_code=404, content={"error": "Preview not found"})
+    return FileResponse(
+        path=str(file_path),
+        media_type="audio/mpeg",
+        filename=filename,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.delete("/api/voices/{voice_id}")
+async def delete_custom_voice(voice_id: str):
+    """Remove a custom voice from the saved list."""
+    custom_voices = _load_custom_voices()
+    before = len(custom_voices)
+    custom_voices = [v for v in custom_voices if v["voice_id"] != voice_id]
+    if len(custom_voices) == before:
+        return JSONResponse(status_code=404, content={"error": "Voice not found in custom list"})
+    _save_custom_voices(custom_voices)
+    # Clean up preview file
+    preview_file = _VOICE_PREVIEWS_DIR / f"{voice_id}.mp3"
+    preview_file.unlink(missing_ok=True)
+    _voices_cache["data"] = None
+    _voices_cache["ts"] = 0
+    return {"success": True, "voice_id": voice_id}
 
 
 @app.post("/api/auth/login")
@@ -768,6 +1020,9 @@ async def start_pipeline(request: Request):
     tts_engine = body.get("tts_engine")
     force_reanalyze = body.get("force_reanalyze", False)
     flow_config_id = body.get("flow_config_id") or body.get("flowConfigId")
+    preselected_voice_id = body.get("preselected_voice_id")
+    preselected_voice_name = body.get("preselected_voice_name")
+    companion_voices = body.get("companion_voices", True)
 
     if not product_text or not country or not telco:
         return JSONResponse(
@@ -788,7 +1043,7 @@ async def start_pipeline(request: Request):
     pipelines[session_id] = state
 
     task = asyncio.create_task(
-        _run_pipeline_bg(state, product_text, country, telco, language, provider, tts_engine, force_reanalyze, flow_config)
+        _run_pipeline_bg(state, product_text, country, telco, language, provider, tts_engine, force_reanalyze, flow_config, preselected_voice_id, preselected_voice_name, companion_voices)
     )
     state.task = task
 
@@ -1843,6 +2098,9 @@ async def websocket_progress(ws: WebSocket, session_id: str):
                         if agent and state.status == "running":
                             state.step_overrides[agent] = "skip"
                             logger.info(f"Step override: skip {agent} for session {session_id}")
+                    elif action == "approve_scripts":
+                        state.script_approval.set()
+                        logger.info(f"Scripts approved by user for session {session_id}")
                 except (json.JSONDecodeError, TypeError):
                     pass
             except WebSocketDisconnect:

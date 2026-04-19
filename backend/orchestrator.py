@@ -70,6 +70,9 @@ class PipelineOrchestrator:
         force_reanalyze: bool = False,
         flow_config: dict[str, Any] | None = None,
         get_step_overrides: Callable[[], dict[str, str]] | None = None,
+        preselected_voice: dict[str, Any] | None = None,
+        script_approval_event: asyncio.Event | None = None,
+        skip_hook_previews: bool = False,
     ) -> dict[str, Any]:
         """Execute the full pipeline.
 
@@ -307,69 +310,165 @@ class PipelineOrchestrator:
 
             results["final_scripts"] = final_scripts
 
-            # ── Step 6: Voice Selection ──
-            await self.on_progress("VoiceSelector", "started", {
-                "message": "Selecting optimal voice and parameters..."
-            })
-            voice_selection = await self.voice_selector.run(
-                scripts=final_scripts,
-                market_analysis=market_analysis,
-                country=country,
-                language=language,
-            )
-            results["voice_selection"] = voice_selection
-            await self.on_progress("VoiceSelector", "completed", {
-                "message": "Voice profile optimised for campaign",
-                "data": voice_selection,
-                "system_prompt": self.voice_selector.last_system_prompt,
-                "user_prompt": self.voice_selector.last_user_prompt,
-            })
+            # ── Gate: Wait for user to approve scripts before continuing ──
+            if script_approval_event and not script_approval_event.is_set():
+                await self.on_progress("ScriptApproval", "waiting", {
+                    "message": "Scripts ready for review. Approve to continue to voice selection and audio previews.",
+                })
+                # Wait up to 30 minutes for user approval
+                try:
+                    await asyncio.wait_for(script_approval_event.wait(), timeout=1800)
+                except asyncio.TimeoutError:
+                    await self.on_progress("ScriptApproval", "completed", {
+                        "message": "Auto-continuing after timeout. Scripts available in results.",
+                    })
+                else:
+                    await self.on_progress("ScriptApproval", "completed", {
+                        "message": "Scripts approved by user. Continuing to audio...",
+                    })
 
-            # ── Step 7: Hook Audio Previews (3 voices, no BGM) ──
-            await self.on_progress("AudioProducer", "started", {
-                "message": "Generating hook audio previews (3 voices)..."
-            })
-            try:
-                # Cap wait so UI never spins forever if TTS/storage hangs
-                _HOOK_PREVIEW_TIMEOUT = 600.0
-                hook_result = await asyncio.wait_for(
-                    self.audio_producer.run_hook_previews(
-                        scripts=final_scripts,
-                        voice_selection=voice_selection,
-                        session_id=session_id,
-                        country=country,
-                        language=language,
-                        tts_engine_override=tts_engine,
-                    ),
-                    timeout=_HOOK_PREVIEW_TIMEOUT,
+            # ── Step 6: Voice Selection ──
+            if preselected_voice and preselected_voice.get("voice_id"):
+                # User pre-selected a voice from Voice Library — skip AI voice selector
+                await self.on_progress("VoiceSelector", "started", {
+                    "message": f"Using pre-selected voice: {preselected_voice.get('name', 'Selected Voice')}..."
+                })
+                voice_selection = {
+                    "selected_voice": {
+                        "voice_id": preselected_voice["voice_id"],
+                        "name": preselected_voice.get("name", "Selected Voice"),
+                        "description": "",
+                        "language": "Multilingual",
+                        "gender": preselected_voice.get("gender", ""),
+                        "age": preselected_voice.get("age", ""),
+                        "accent": preselected_voice.get("accent", ""),
+                    },
+                    "voice_settings": {
+                        "stability": 0.50,
+                        "similarity_boost": 0.80,
+                        "style": 0.30,
+                        "speed": 1.0,
+                    },
+                    "elevenlabs_api_params": {
+                        "model_id": "eleven_v3",
+                        "output_format": "mp3_44100_128",
+                        "voice_id": preselected_voice["voice_id"],
+                    },
+                    "rationale": f"User pre-selected {preselected_voice.get('name', 'this voice')} from the Voice Library.",
+                    "alternative_voices": [],
+                }
+                results["voice_selection"] = voice_selection
+                await self.on_progress("VoiceSelector", "completed", {
+                    "message": f"Voice pre-selected by user: {preselected_voice.get('name', 'Selected Voice')}",
+                    "data": voice_selection,
+                })
+            else:
+                await self.on_progress("VoiceSelector", "started", {
+                    "message": "Selecting optimal voice and parameters..."
+                })
+                voice_selection = await self.voice_selector.run(
+                    scripts=final_scripts,
+                    market_analysis=market_analysis,
+                    country=country,
+                    language=language,
                 )
-                results["hook_previews"] = hook_result
-                engine = hook_result.get("tts_engine", "unknown")
-                engine_label = {"murf": "Murf AI", "elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
-                preview_count = hook_result.get("summary", {}).get("total_generated", 0)
-                await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Generated {preview_count} hook previews via {engine_label}. Choose voices (2F + 1M per variant) and BGM, then generate final audio.",
-                    "data": {"summary": hook_result.get("summary", {}), "tts_engine": engine, "tts_engine_label": engine_label},
+                results["voice_selection"] = voice_selection
+                await self.on_progress("VoiceSelector", "completed", {
+                    "message": "Voice profile optimised for campaign",
+                    "data": voice_selection,
+                    "system_prompt": self.voice_selector.last_system_prompt,
+                    "user_prompt": self.voice_selector.last_user_prompt,
                 })
-                # Pipeline stops here. User chooses voices from hook previews and BGM, then clicks "Generate Full Audio" (Phase 2).
-            except asyncio.TimeoutError:
-                logger.error("Hook preview generation timed out — scripts still available")
-                await self.on_progress("AudioProducer", "completed", {
-                    "message": "Hook previews timed out (TTS took too long). Scripts are still available — try again or use Script to Voice.",
+
+            # ── Step 7: Hook Audio Previews OR Direct Full Audio ──
+            if skip_hook_previews and preselected_voice:
+                # User chose "No companions" — skip previews, generate full audio directly
+                await self.on_progress("AudioProducer", "started", {
+                    "message": f"Generating final audio with {preselected_voice.get('name', 'selected voice')} (no previews)..."
                 })
-            except Exception as audio_err:
-                logger.error(f"Hook preview generation failed: {audio_err}")
-                await self.on_progress("AudioProducer", "completed", {
-                    "message": f"Hook preview generation failed: {str(audio_err)}. Scripts are still available.",
+                try:
+                    _FULL_AUDIO_TIMEOUT = 600.0
+                    # Build voice choices: all variants use the same voice (index 1)
+                    script_list = final_scripts.get("scripts", [])
+                    voice_choices = {s.get("variant_id", i + 1): 1 for i, s in enumerate(script_list)}
+                    audio_result = await asyncio.wait_for(
+                        self.audio_producer.run_final_audio(
+                            scripts=final_scripts,
+                            voice_selection=voice_selection,
+                            voice_choices=voice_choices,
+                            session_id=session_id,
+                            country=country,
+                            language=language,
+                            tts_engine_override=tts_engine,
+                            bgm_style="upbeat",
+                            audio_format="mp3",
+                        ),
+                        timeout=_FULL_AUDIO_TIMEOUT,
+                    )
+                    results["audio"] = audio_result
+                    engine = audio_result.get("tts_engine", "unknown")
+                    engine_label = {"elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
+                    total_gen = audio_result.get("summary", {}).get("total_generated", 0)
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": f"Generated {total_gen} audio files via {engine_label} with {preselected_voice.get('name', 'selected voice')}.",
+                        "data": {"summary": audio_result.get("summary", {}), "tts_engine": engine, "tts_engine_label": engine_label},
+                    })
+                except asyncio.TimeoutError:
+                    logger.error("Full audio generation timed out")
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": "Audio generation timed out. Scripts are still available.",
+                    })
+                except Exception as audio_err:
+                    logger.error(f"Full audio generation failed: {audio_err}")
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": f"Audio generation failed: {str(audio_err)}. Scripts are still available.",
+                    })
+            else:
+                # Normal flow: generate 3-voice hook previews for user to pick from
+                await self.on_progress("AudioProducer", "started", {
+                    "message": "Generating hook audio previews (3 voices)..."
                 })
+                try:
+                    _HOOK_PREVIEW_TIMEOUT = 600.0
+                    hook_result = await asyncio.wait_for(
+                        self.audio_producer.run_hook_previews(
+                            scripts=final_scripts,
+                            voice_selection=voice_selection,
+                            session_id=session_id,
+                            country=country,
+                            language=language,
+                            tts_engine_override=tts_engine,
+                        ),
+                        timeout=_HOOK_PREVIEW_TIMEOUT,
+                    )
+                    results["hook_previews"] = hook_result
+                    engine = hook_result.get("tts_engine", "unknown")
+                    engine_label = {"elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
+                    preview_count = hook_result.get("summary", {}).get("total_generated", 0)
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": f"Generated {preview_count} hook previews via {engine_label}. Choose voices (2F + 1M per variant) and BGM, then generate final audio.",
+                        "data": {"summary": hook_result.get("summary", {}), "tts_engine": engine, "tts_engine_label": engine_label},
+                    })
+                except asyncio.TimeoutError:
+                    logger.error("Hook preview generation timed out — scripts still available")
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": "Hook previews timed out (TTS took too long). Scripts are still available — try again or use Script to Voice.",
+                    })
+                except Exception as audio_err:
+                    logger.error(f"Hook preview generation failed: {audio_err}")
+                    await self.on_progress("AudioProducer", "completed", {
+                        "message": f"Hook preview generation failed: {str(audio_err)}. Scripts are still available.",
+                    })
 
             # ── Pipeline Complete ──
             total_time = time.monotonic() - pipeline_start
             has_audio = bool(results.get("audio", {}).get("summary", {}).get("total_generated", 0))
-            logger.info(f"Pipeline completed in {total_time:.1f}s (audio={'yes' if has_audio else 'no'})")
+            has_previews = bool(results.get("hook_previews", {}).get("summary", {}).get("total_generated", 0))
+            logger.info(f"Pipeline completed in {total_time:.1f}s (audio={'yes' if has_audio else 'no'}, previews={'yes' if has_previews else 'no'})")
             done_msg = (
                 "Scripts and audio are ready." if has_audio
-                else "Scripts and hook previews are ready. Choose voices (2F + 1M per variant) and BGM, then click Generate Full Audio."
+                else "Scripts and hook previews are ready. Choose voices and BGM, then click Generate Full Audio." if has_previews
+                else "Scripts are ready."
             )
             await self.on_progress("Pipeline", "completed", {
                 "message": f"Pipeline complete in {total_time:.0f}s! {done_msg}",
@@ -415,7 +514,7 @@ class PipelineOrchestrator:
                 prebuilt_engine_ctx=prebuilt_engine_ctx,
             )
             engine = audio_result.get("tts_engine", "unknown")
-            engine_label = {"murf": "Murf AI", "elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
+            engine_label = {"elevenlabs": "ElevenLabs", "edge-tts": "Edge TTS"}.get(engine, engine)
             successful = audio_result.get("summary", {}).get("total_generated", 0)
             await self.on_progress("AudioProducer", "completed", {
                 "message": f"Generated {successful} final audio files via {engine_label}",

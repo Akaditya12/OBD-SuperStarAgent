@@ -25,7 +25,7 @@ import {
   GraduationCap,
 } from "lucide-react";
 import { getFallbackPresets, mapApiPresetToProductPreset } from "@/components/ProductPresets";
-import type { ProductPreset } from "@/components/ProductPresets";
+import type { ProductPreset, ProductPresetFromAPI } from "@/components/ProductPresets";
 
 const ICON_MAP: Record<string, React.ReactNode> = {
   "ai-personal-assistant": <Sparkles className="w-6 h-6" />,
@@ -33,7 +33,6 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   smartconnect: <Radio className="w-6 h-6" />,
   callsignature: <Shield className="w-6 h-6" />,
   magicvoice: <Mic2 className="w-6 h-6" />,
-  magiccall: <Phone className="w-6 h-6" />,
   dreamtravel: <Plane className="w-6 h-6" />,
   mobibattle: <Gamepad2 className="w-6 h-6" />,
   swipenwin: <BookOpen className="w-6 h-6" />,
@@ -78,13 +77,6 @@ const PRODUCT_FLOWS: Record<string, FlowStep[]> = {
     { step: 3, title: "Select Ambience (Optional)", description: "Add background effects: Concert, Airport, Traffic, James Bond" },
     { step: 4, title: "Call Connected", description: "Call connected to B-party with the chosen voice or ambience applied in real-time" },
     { step: 5, title: "Fun Conversation", description: "Enjoy a fun, personalized calling experience" },
-  ],
-  magiccall: [
-    { step: 1, title: "Download App", description: "User installs Magic Call from Play Store / App Store" },
-    { step: 2, title: "Select Voice Effect", description: "Choose from male, female, child, robot, celebrity voices" },
-    { step: 3, title: "Make a Call", description: "Dial any number through the app" },
-    { step: 4, title: "Real-time Voice Change", description: "Voice is transformed live during the call" },
-    { step: 5, title: "Share & Go Viral", description: "Users share experiences, driving organic growth" },
   ],
   dreamtravel: [
     { step: 1, title: "Subscribe & Join", description: "Customer opts in through SMS, IVR, or website" },
@@ -156,12 +148,6 @@ const PRODUCT_STATS: Record<string, { label: string; value: string; icon: React.
     { label: "Channels", value: "IVR + App", icon: <Phone className="w-4 h-4" /> },
     { label: "Go Live", value: "3 weeks", icon: <Zap className="w-4 h-4" /> },
   ],
-  magiccall: [
-    { label: "Downloads", value: "20M+", icon: <TrendingUp className="w-4 h-4" /> },
-    { label: "Platforms", value: "Android + iOS", icon: <Phone className="w-4 h-4" /> },
-    { label: "Growth", value: "Viral", icon: <Zap className="w-4 h-4" /> },
-    { label: "Model", value: "Freemium", icon: <DollarSign className="w-4 h-4" /> },
-  ],
   dreamtravel: [
     { label: "Telco Partners", value: "160+", icon: <Globe className="w-4 h-4" /> },
     { label: "Countries", value: "90+", icon: <Globe className="w-4 h-4" /> },
@@ -231,7 +217,7 @@ export default function ProductDetailPage() {
     const fallbackList = getFallbackPresets();
     fetch("/api/product-presets")
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
-      .then((data: { presets?: Array<{ id: string; name: string; icon: string; shortDesc: string; fullDescription: string; category: string }> }) => {
+      .then((data: { presets?: ProductPresetFromAPI[] }) => {
         if (cancelled) return;
         const apiList = data.presets?.length ? data.presets.map(mapApiPresetToProductPreset) : [];
         let productFromApi = apiList.find((p) => p.id === productId);
@@ -306,11 +292,18 @@ export default function ProductDetailPage() {
   const icon = ICON_MAP[productId];
 
   const descSections = productResolved.fullDescription.split("\n\n").filter(Boolean);
-  const overview = descSections.find((s) => s.includes("Product Overview:"))?.replace("Product Overview:", "").trim() || "";
+  // Support both old format ("Product Overview:") and new EVA format ("How EVA Solves This:")
+  const overview = descSections.find((s) => s.includes("Product Overview:"))?.replace("Product Overview:", "").trim()
+    || descSections.find((s) => s.includes("How EVA Solves This:"))?.replace("How EVA Solves This:", "").trim()
+    || "";
   const features = descSections.find((s) => s.includes("Key Features:"));
+  // Support numbered "What EVA Does:" list as features
+  const whatEvaDoes = descSections.find((s) => s.includes("What EVA Does:"));
   const featureList = features
     ? features.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.replace("- ", ""))
-    : [];
+    : whatEvaDoes
+      ? whatEvaDoes.split("\n").filter((l) => /^\d+\./.test(l.trim())).map((l) => l.replace(/^\d+\.\s*/, "").trim())
+      : [];
   const valuePropSection = descSections.find(
     (s) => s.includes("Value Proposition for Subscribers:") || s.includes("Value Proposition:") || s.includes("Value for Telcos:") || s.includes("Benefits for Telcos:") || s.includes("What's In It for Operators:")
   );

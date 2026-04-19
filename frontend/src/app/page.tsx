@@ -28,10 +28,12 @@ import CountryTelcoSelect from "@/components/CountryTelcoSelect";
 import PipelineProgress from "@/components/PipelineProgress";
 import type { ProgressStep } from "@/components/PipelineProgress";
 import ProductPresets, { getFallbackPresets, mapApiPresetToProductPreset } from "@/components/ProductPresets";
-import type { ProductPreset } from "@/components/ProductPresets";
+import type { ProductPreset, ProductPresetFromAPI } from "@/components/ProductPresets";
 import PromotionTypeSelect, { PROMOTION_TYPES } from "@/components/PromotionTypeSelect";
 import type { PromotionType } from "@/components/PromotionTypeSelect";
 import VoiceInfoPanel from "@/components/VoiceInfoPanel";
+import AgentOutputPanel from "@/components/AgentOutputPanel";
+import { useVoice } from "@/components/VoiceContext";
 import { useToast } from "@/components/ToastProvider";
 import type {
   PipelineResult,
@@ -41,7 +43,7 @@ import type {
   HookPreviewResult,
   AudioResult,
 } from "@/lib/types";
-import { Database, GitBranch, Languages, Music, Radio, Upload, VolumeX } from "lucide-react";
+import { Database, GitBranch, Languages, Mic2, Music, Radio, Upload, VolumeX } from "lucide-react";
 import { forceDownload } from "@/lib/utils";
 
 type WizardStep = "input" | "running" | "results";
@@ -72,6 +74,7 @@ function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { selectedVoice } = useVoice();
 
   // Auth
   const [authChecked, setAuthChecked] = useState(false);
@@ -87,7 +90,7 @@ function HomePageContent() {
   const [telco, setTelco] = useState("");
   const [language, setLanguage] = useState("");
   const [promotionType, setPromotionType] = useState("obd_standard");
-  const [ttsEngine, setTtsEngine] = useState<"auto" | "murf" | "elevenlabs" | "edge-tts">("auto");
+  const [ttsEngine, setTtsEngine] = useState<"auto" | "elevenlabs" | "edge-tts">("auto");
   const [forceReanalyze, setForceReanalyze] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<{
     exact: boolean; exact_cached_at?: string;
@@ -100,7 +103,7 @@ function HomePageContent() {
     let cancelled = false;
     fetch("/api/product-presets")
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to fetch"))))
-      .then((data: { presets?: Array<{ id: string; name: string; icon: string; shortDesc: string; fullDescription: string; category: string }> }) => {
+      .then((data: { presets?: ProductPresetFromAPI[] }) => {
         if (cancelled || !data.presets?.length) return;
         setPresets(data.presets.map(mapApiPresetToProductPreset));
       })
@@ -149,6 +152,25 @@ function HomePageContent() {
     } catch { return null; }
   });
   const [error, setError] = useState("");
+  const [waitingForApproval, setWaitingForApproval] = useState(false);
+  const [approvalScripts, setApprovalScripts] = useState<Script[] | null>(null);
+  const [companionVoices, setCompanionVoices] = useState(true);
+
+  // Populate approvalScripts from progressSteps when approval gate activates
+  useEffect(() => {
+    if (waitingForApproval) {
+      const scriptStep = [...progressSteps].reverse().find(
+        (s) => (s.agent === "ScriptWriter_Revision" || s.agent === "ScriptWriter") && s.status === "completed" && s.data
+      );
+      if (scriptStep?.data) {
+        const nested = (scriptStep.data.data || scriptStep.data) as Record<string, unknown>;
+        const scripts = (nested.scripts || []) as Script[];
+        if (scripts.length > 0) setApprovalScripts(scripts);
+      }
+    } else {
+      setApprovalScripts(null);
+    }
+  }, [waitingForApproval, progressSteps]);
 
   // Persist result + wizard step to sessionStorage so navigation doesn't lose them
   useEffect(() => {
@@ -273,11 +295,11 @@ function HomePageContent() {
 
   // ── Update Step helper ──
   const updateStep = useCallback(
-    (agent: string, status: string, message: string) => {
+    (agent: string, status: string, message: string, data?: Record<string, unknown>) => {
       setProgressSteps((prev) =>
         prev.map((s) =>
           s.agent === agent
-            ? { ...s, status: status as ProgressStep["status"], message }
+            ? { ...s, status: status as ProgressStep["status"], message, ...(data !== undefined ? { data } : {}) }
             : s
         )
       );
@@ -309,11 +331,16 @@ function HomePageContent() {
               localStorage.removeItem("obd_active_session");
               toast("error", data.message || "Pipeline failed");
             }
+          } else if (data.agent === "ScriptApproval" && data.status === "waiting") {
+            setWaitingForApproval(true);
+          } else if (data.agent === "ScriptApproval" && data.status === "completed") {
+            setWaitingForApproval(false);
           } else {
             updateStep(
               data.agent || "",
               data.status || "",
-              data.message || ""
+              data.message || "",
+              data.data
             );
           }
         } catch {
@@ -351,7 +378,7 @@ function HomePageContent() {
               }
               if (data.progress) {
                 for (const msg of data.progress) {
-                  updateStep(msg.agent || "", msg.status || "", msg.message || "");
+                  updateStep(msg.agent || "", msg.status || "", msg.message || "", msg.data);
                 }
               }
             } catch { /* retry */ }
@@ -415,6 +442,7 @@ function HomePageContent() {
     setError("");
     setResult(null);
     setSaved(false);
+    setWaitingForApproval(false);
     setProgressSteps(
       PIPELINE_STEPS.map((s) => ({ ...s, status: "pending", message: "" }))
     );
@@ -437,6 +465,9 @@ function HomePageContent() {
           tts_engine: ttsEngine === "auto" ? undefined : ttsEngine,
           force_reanalyze: forceReanalyze,
           flow_config_id: flowConfigId || undefined,
+          preselected_voice_id: selectedVoice?.voice_id || undefined,
+          preselected_voice_name: selectedVoice?.name || undefined,
+          companion_voices: selectedVoice ? companionVoices : true,
         }),
       });
 
@@ -578,11 +609,12 @@ function HomePageContent() {
   };
 
   const saveEdit = async (variantId: number) => {
-    if (!result?.session_id) return;
+    const sessionId = result?.session_id || localStorage.getItem("obd_active_session");
+    if (!sessionId) return;
     setSavingEdit(true);
     try {
       const res = await fetch(
-        `/api/sessions/${result.session_id}/scripts/${variantId}`,
+        `/api/sessions/${sessionId}/scripts/${variantId}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -591,16 +623,24 @@ function HomePageContent() {
       );
       if (res.ok) {
         const { script: updated } = await res.json();
-        // Update local state
-        const updateScripts = (sr: typeof result.final_scripts) => {
-          if (!sr?.scripts) return;
-          const idx = sr.scripts.findIndex((s) => s.variant_id === variantId);
-          if (idx >= 0) sr.scripts[idx] = { ...sr.scripts[idx], ...updated };
-        };
-        if (result.final_scripts) updateScripts(result.final_scripts);
-        if (result.revised_scripts_round_1) updateScripts(result.revised_scripts_round_1);
-        if (result.initial_scripts) updateScripts(result.initial_scripts);
-        setResult({ ...result });
+        // Update result state (if available — results step)
+        if (result) {
+          const updateScripts = (sr: typeof result.final_scripts) => {
+            if (!sr?.scripts) return;
+            const idx = sr.scripts.findIndex((s) => s.variant_id === variantId);
+            if (idx >= 0) sr.scripts[idx] = { ...sr.scripts[idx], ...updated };
+          };
+          if (result.final_scripts) updateScripts(result.final_scripts);
+          if (result.revised_scripts_round_1) updateScripts(result.revised_scripts_round_1);
+          if (result.initial_scripts) updateScripts(result.initial_scripts);
+          setResult({ ...result });
+        }
+        // Update approvalScripts state (if in approval gate)
+        if (approvalScripts) {
+          setApprovalScripts(prev => prev ? prev.map(s =>
+            s.variant_id === variantId ? { ...s, ...updated } : s
+          ) : null);
+        }
         setEditedVariants((prev) => new Set(prev).add(variantId));
         setEditingVariant(null);
         setEditDraft({});
@@ -845,7 +885,7 @@ function HomePageContent() {
   const voiceSelection = result?.voice_selection;
   const hookSessionId = hookPreviews?.session_id || result?.session_id || "";
   const resolvedEngine = hookPreviews?.tts_engine || result?.audio?.tts_engine;
-  const resolvedEngineLabel = resolvedEngine === "murf" ? "Murf AI" : resolvedEngine === "edge-tts" ? "Edge TTS" : resolvedEngine === "elevenlabs" ? "ElevenLabs" : null;
+  const resolvedEngineLabel = resolvedEngine === "edge-tts" ? "Edge TTS" : resolvedEngine === "elevenlabs" ? "ElevenLabs" : null;
 
   const WIZARD_LABELS = ["Configure", "Generate", "Results"];
 
@@ -1010,36 +1050,66 @@ function HomePageContent() {
               </div>
             )}
 
-            {/* TTS Engine */}
-            <div className="p-5 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] transition-colors">
-              <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-3">
-                <Volume2 className="w-4 h-4 text-[var(--accent)]" />
-                Voice Engine
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {([
-                  { id: "auto", label: "Auto", desc: "Best available" },
-                  { id: "murf", label: "Murf AI", desc: "Premium" },
-                  { id: "elevenlabs", label: "ElevenLabs", desc: "Premium" },
-                  { id: "edge-tts", label: "Free TTS", desc: "edge-tts" },
-                ] as const).map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setTtsEngine(opt.id)}
-                    className={`px-3 py-2.5 rounded-xl text-left border transition-all ${ttsEngine === opt.id
-                        ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]/30"
-                        : "border-[var(--card-border)] bg-[var(--input-bg)] hover:border-[var(--card-border-hover)]"
-                      }`}
-                  >
-                    <div className={`text-xs font-medium ${ttsEngine === opt.id ? "text-[var(--accent)]" : "text-[var(--text-primary)]"}`}>
-                      {opt.label}
-                    </div>
-                    <div className="text-[10px] text-[var(--text-tertiary)]">{opt.desc}</div>
-                  </button>
-                ))}
+            {/* Voice Engine Badge */}
+            <div className="p-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] flex items-center gap-3">
+              <Volume2 className="w-4 h-4 text-[var(--accent)]" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-[var(--text-primary)]">Voice Engine</p>
+                <p className="text-[10px] text-[var(--text-tertiary)]">Powered by ElevenLabs &middot; Premium multilingual TTS</p>
               </div>
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-purple-500/10 text-purple-500 border border-purple-500/20">
+                ElevenLabs
+              </span>
             </div>
+
+            {/* Pre-selected voice indicator + companion toggle */}
+            {selectedVoice && (
+              <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+                <div className="p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Mic2 className="w-4 h-4 text-purple-400 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-[var(--text-primary)]">
+                        Voice: {selectedVoice.name}
+                      </p>
+                      <p className="text-[10px] text-[var(--text-tertiary)]">
+                        {selectedVoice.labels?.accent} &middot; {selectedVoice.labels?.gender} &middot; Pre-selected from Voice Library
+                      </p>
+                    </div>
+                  </div>
+                  <a href="/voice-library" className="text-[10px] text-purple-400 hover:text-purple-300 font-medium">
+                    Change
+                  </a>
+                </div>
+                <div className="px-3 pb-3 pt-1 border-t border-purple-500/10">
+                  <p className="text-[10px] font-medium text-[var(--text-tertiary)] mb-1.5">Companion Voices</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCompanionVoices(true)}
+                      className={`flex-1 px-3 py-2 rounded-xl text-[11px] font-medium border transition-all text-left ${
+                        companionVoices
+                          ? "border-purple-500/40 bg-purple-500/10 text-purple-400"
+                          : "border-[var(--card-border)] text-[var(--text-tertiary)] hover:border-purple-500/20"
+                      }`}
+                    >
+                      <span className="font-semibold">Yes</span> — add 2 region-matched voices (1F + 1M)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompanionVoices(false)}
+                      className={`flex-1 px-3 py-2 rounded-xl text-[11px] font-medium border transition-all text-left ${
+                        !companionVoices
+                          ? "border-purple-500/40 bg-purple-500/10 text-purple-400"
+                          : "border-[var(--card-border)] text-[var(--text-tertiary)] hover:border-purple-500/20"
+                      }`}
+                    >
+                      <span className="font-semibold">No</span> — use only this voice, skip previews
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Cache awareness banner */}
             {cacheStatus && (cacheStatus.exact || cacheStatus.partial) && (
@@ -1142,7 +1212,7 @@ function HomePageContent() {
 
       {/* ── RUNNING STEP ── */}
       {wizardStep === "running" && (
-        <div className="animate-fade-in max-w-2xl mx-auto">
+        <div className="animate-fade-in max-w-6xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-xl font-bold text-[var(--text-primary)] mb-2">
               Generating Your Campaign
@@ -1151,27 +1221,260 @@ function HomePageContent() {
               Our 6-agent pipeline is crafting your scripts...
             </p>
           </div>
-          <PipelineProgress
-            steps={progressSteps}
-            skippableAgents={["EvalPanel"]}
-            onSkipStep={(agent) => {
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ action: "skip_step", agent }));
-              }
-            }}
-          />
-          <div className="mt-6 flex flex-col items-center gap-2">
-            <button
-              type="button"
-              onClick={handleGoBackFromRunning}
-              className="px-4 py-2 rounded-xl text-sm font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card)] hover:border-[var(--card-border-hover)] transition-colors"
-            >
-              Go back to setup
-            </button>
-            <p className="text-[10px] text-[var(--text-tertiary)] text-center max-w-sm">
-              If the pipeline is stuck, use this to return to the form. You can change options and run again, or restart the backend if needed.
-            </p>
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+            {/* Left: Pipeline progress */}
+            <div className="lg:col-span-2">
+              <PipelineProgress
+                steps={progressSteps}
+                skippableAgents={["EvalPanel"]}
+                onSkipStep={(agent) => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ action: "skip_step", agent }));
+                  }
+                }}
+              />
+              {!waitingForApproval && (
+                <div className="mt-6 flex flex-col items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGoBackFromRunning}
+                    className="px-4 py-2 rounded-xl text-sm font-medium border border-[var(--card-border)] text-[var(--text-secondary)] hover:bg-[var(--card)] hover:border-[var(--card-border-hover)] transition-colors"
+                  >
+                    Go back to setup
+                  </button>
+                  <p className="text-[10px] text-[var(--text-tertiary)] text-center max-w-sm">
+                    If the pipeline is stuck, use this to return to the form. You can change options and run again, or restart the backend if needed.
+                  </p>
+                </div>
+              )}
+            </div>
+            {/* Right: Agent outputs panel */}
+            <div className="lg:col-span-3">
+              <AgentOutputPanel steps={progressSteps} />
+            </div>
           </div>
+
+          {/* ── Script Approval Gate (full-width below pipeline) ── */}
+          {waitingForApproval && (() => {
+            // Extract scripts from the latest script step data
+            // Backend sends: { data: { scripts: [...] }, system_prompt, user_prompt }
+            // So scripts live at step.data.data.scripts OR step.data.scripts
+            const scriptStep = [...progressSteps].reverse().find(
+              (s) => (s.agent === "ScriptWriter_Revision" || s.agent === "ScriptWriter") && s.status === "completed" && s.data
+            );
+            const stepData = scriptStep?.data as Record<string, unknown> | undefined;
+            const nestedData = (stepData?.data || stepData) as Record<string, unknown> | undefined;
+            const scriptsData = ((nestedData?.scripts || []) as Array<Record<string, unknown>>);
+
+            return (
+              <div className="mt-6 animate-fade-in space-y-4">
+                {/* Header bar */}
+                <div className="rounded-2xl border-2 border-[var(--accent)] bg-[var(--accent-subtle)] p-5">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-[var(--text-primary)]">
+                        Review Your Scripts
+                      </h3>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                        {scriptsData.length} variants generated. Review below, then approve to continue to voice selection and audio previews.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGoBackFromRunning}
+                        className="px-4 py-2.5 rounded-xl text-xs font-medium border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        Reject &amp; Go Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (wsRef.current?.readyState === WebSocket.OPEN) {
+                            wsRef.current.send(JSON.stringify({ action: "approve_scripts" }));
+                          }
+                          setWaitingForApproval(false);
+                        }}
+                        className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-[var(--accent)] text-white hover:opacity-90 transition-all shadow-sm"
+                      >
+                        Approve &amp; Continue to Audio
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Full script variants with edit/translate */}
+                {(approvalScripts && approvalScripts.length > 0) ? (
+                  <div className="space-y-3">
+                    {approvalScripts.map((script: Script, idx: number) => {
+                      const vid = script.variant_id || idx + 1;
+                      const isEditing = editingVariant === vid;
+                      const isEdited = editedVariants.has(vid);
+                      const SECTIONS = ["hook", "body", "cta", "full_script", "fallback_1", "fallback_2", "polite_closure"] as const;
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`rounded-2xl bg-[var(--card)] border overflow-hidden transition-colors ${isEdited
+                            ? "border-amber-500/40 bg-amber-500/5"
+                            : "border-[var(--card-border)]"
+                          }`}
+                        >
+                          {/* Header */}
+                          <button
+                            className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-[var(--input-bg)] transition-colors"
+                            onClick={() => setExpandedScript(expandedScript === idx ? null : idx)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-[var(--text-primary)]">Variant {vid}</span>
+                              <span className="text-xs text-[var(--accent)]">{script.theme || ""}</span>
+                              {isEdited && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">edited</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-[var(--text-tertiary)] bg-[var(--input-bg)] px-2 py-0.5 rounded-full">
+                                {script.word_count || "?"} words
+                              </span>
+                              {expandedScript === idx ? <ChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />}
+                            </div>
+                          </button>
+
+                          {expandedScript === idx && (
+                            <div className="px-5 pb-5 space-y-3 animate-fade-in border-t border-[var(--card-border)]">
+                              {/* Toolbar */}
+                              <div className="flex items-center gap-2 pt-2">
+                                {!isEditing ? (
+                                  <>
+                                    <button
+                                      onClick={() => startEditing(script)}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] transition-colors"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                      Edit Script
+                                    </button>
+                                    {language && language.toLowerCase() !== "english" && (
+                                      <button
+                                        onClick={() => handleTranslate(script)}
+                                        disabled={translatingVariant === vid}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-blue-400 hover:bg-blue-500/10 border border-blue-500/20 transition-colors disabled:opacity-50"
+                                      >
+                                        <Languages className="w-3 h-3" />
+                                        {translatingVariant === vid ? "Translating..." : showTranslation[vid] ? "Hide Translation" : "Translate to English"}
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => saveEdit(vid)}
+                                      disabled={savingEdit}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-[var(--accent)] hover:opacity-90 transition-all disabled:opacity-50"
+                                    >
+                                      {savingEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                      Save
+                                    </button>
+                                    <button
+                                      onClick={cancelEditing}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:bg-[var(--input-bg)] border border-[var(--card-border)] transition-colors"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+
+                              {/* Translation */}
+                              {showTranslation[vid] && translations[vid] && (
+                                <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
+                                      <Languages className="w-2.5 h-2.5" />
+                                      English Translation
+                                    </span>
+                                    <button
+                                      onClick={() => { navigator.clipboard.writeText(translations[vid]); toast("info", "Translation copied"); }}
+                                      className="p-0.5 rounded hover:bg-blue-500/10 text-blue-400/60 hover:text-blue-400 transition-colors"
+                                    >
+                                      <Copy className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                                    {translations[vid]}
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Script sections */}
+                              {SECTIONS.map((key) => {
+                                const value = isEditing ? (editDraft[key] ?? "") : ((script as unknown as Record<string, unknown>)[key] as string || "");
+                                if (!isEditing && !value) return null;
+                                const label = key.replace(/_/g, " ").toUpperCase();
+                                return (
+                                  <div key={key}>
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium mb-1">{label}</p>
+                                      {!isEditing && value && (
+                                        <button
+                                          onClick={() => { navigator.clipboard.writeText(value); toast("info", `${label} copied`); }}
+                                          className="p-0.5 rounded hover:bg-[var(--accent-subtle)] text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
+                                        >
+                                          <Copy className="w-2.5 h-2.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                    {isEditing ? (
+                                      <textarea
+                                        value={editDraft[key] ?? ""}
+                                        onChange={(e) => setEditDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                                        rows={key === "full_script" ? 5 : 3}
+                                        className="w-full p-3 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)] text-xs text-[var(--text-primary)] leading-relaxed focus:outline-none focus:border-[var(--accent)]/50 resize-y"
+                                      />
+                                    ) : (
+                                      <div className="p-3 rounded-xl bg-[var(--input-bg)] text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">
+                                        {value}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl bg-[var(--card)] border border-[var(--card-border)] p-8 text-center">
+                    <p className="text-sm text-[var(--text-tertiary)]">Scripts data not available in progress — approve to continue.</p>
+                  </div>
+                )}
+
+                {/* Bottom action bar */}
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleGoBackFromRunning}
+                    className="px-5 py-2.5 rounded-xl text-xs font-medium border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    Reject &amp; Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ action: "approve_scripts" }));
+                      }
+                      setWaitingForApproval(false);
+                    }}
+                    className="px-8 py-2.5 rounded-xl text-xs font-semibold bg-[var(--accent)] text-white hover:opacity-90 transition-all shadow-sm"
+                  >
+                    Approve &amp; Continue to Audio
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1667,7 +1970,7 @@ function HomePageContent() {
                   Final Audio Files
                   {result?.audio?.tts_engine && (
                     <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)]">
-                      {result.audio.tts_engine === "murf" ? "Murf AI" : result.audio.tts_engine === "edge-tts" ? "Edge TTS" : "ElevenLabs"}
+                      {result.audio.tts_engine === "edge-tts" ? "Edge TTS" : "ElevenLabs"}
                     </span>
                   )}
                   {result?.audio?.summary?.bgm_style && (

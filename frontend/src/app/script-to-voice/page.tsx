@@ -22,6 +22,7 @@ import {
   Unlock,
 } from "lucide-react";
 import CountryTelcoSelect from "@/components/CountryTelcoSelect";
+import { useVoice } from "@/components/VoiceContext";
 import { forceDownload } from "@/lib/utils";
 
 type Step = "input" | "previews" | "result";
@@ -49,12 +50,12 @@ const BGM_STYLES = [
 const TTS_ENGINES = [
   { id: "auto", label: "Auto (Best Available)" },
   { id: "elevenlabs", label: "ElevenLabs" },
-  { id: "murf", label: "Murf AI" },
   { id: "edge-tts", label: "Edge TTS (Free)" },
 ];
 
 export default function ScriptToVoicePage() {
   const router = useRouter();
+  const { selectedVoice: libraryVoice } = useVoice();
 
   const [authChecked, setAuthChecked] = useState(false);
   useEffect(() => {
@@ -103,6 +104,18 @@ export default function ScriptToVoicePage() {
     label: string;
     engine: string;
   } | null>(null);
+
+  // Auto-populate locked voice from Voice Library selection
+  useEffect(() => {
+    if (libraryVoice && !lockedVoice) {
+      setLockedVoice({
+        voice_id: libraryVoice.voice_id,
+        label: libraryVoice.name,
+        engine: "elevenlabs",
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryVoice]);
 
   // Save state
   const [saveName, setSaveName] = useState("");
@@ -560,7 +573,7 @@ export default function ScriptToVoicePage() {
                   <div>
                     <p className="text-sm font-semibold text-[var(--text-primary)]">Voice Locked: {lockedVoice.label}</p>
                     <p className="text-[10px] text-[var(--text-tertiary)]">
-                      Same voice will be used for this script &middot; {lockedVoice.engine === "elevenlabs" ? "ElevenLabs" : lockedVoice.engine === "murf" ? "Murf AI" : lockedVoice.engine || "Auto"}
+                      Same voice will be used for this script &middot; {lockedVoice.engine === "elevenlabs" ? "ElevenLabs" : lockedVoice.engine === "edge-tts" ? "Edge TTS" : lockedVoice.engine || "Auto"}
                     </p>
                   </div>
                 </div>
@@ -616,7 +629,7 @@ export default function ScriptToVoicePage() {
                 </h2>
                 {activeTtsEngine && (
                   <span className="text-[10px] px-2.5 py-1 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] font-medium border border-[var(--accent)]/20">
-                    {activeTtsEngine === "elevenlabs" ? "ElevenLabs" : activeTtsEngine === "murf" ? "Murf AI" : activeTtsEngine === "edge-tts" ? "Edge TTS" : activeTtsEngine}
+                    {activeTtsEngine === "elevenlabs" ? "ElevenLabs" : activeTtsEngine === "edge-tts" ? "Edge TTS" : activeTtsEngine}
                   </span>
                 )}
               </div>
@@ -741,7 +754,7 @@ export default function ScriptToVoicePage() {
                   Voice: {finalAudio.voice_name} &middot; Format: {audioFormat.toUpperCase()} &middot; BGM: {bgmStyle === "none" ? "None" : bgmStyle}
                   {activeTtsEngine && (
                     <span className="ml-2 inline-flex px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] text-[10px] font-medium">
-                      {activeTtsEngine === "elevenlabs" ? "ElevenLabs" : activeTtsEngine === "murf" ? "Murf AI" : activeTtsEngine === "edge-tts" ? "Edge TTS" : activeTtsEngine}
+                      {activeTtsEngine === "elevenlabs" ? "ElevenLabs" : activeTtsEngine === "edge-tts" ? "Edge TTS" : activeTtsEngine}
                     </span>
                   )}
                 </p>

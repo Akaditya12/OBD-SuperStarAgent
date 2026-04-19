@@ -56,20 +56,30 @@ const FALLBACK_RAW: ProductPresetFromAPI[] = [
     id: "ai-personal-assistant",
     name: "AI personal assistant",
     icon: "Sparkles",
-    shortDesc: "AI assistant that handles calls when you're busy",
+    shortDesc: "When you can't pick up, EVA PA picks up for you",
     category: "ai",
-    fullDescription: `AI personal assistant on Voice Call
+    fullDescription: `EVA — Your AI Personal Assistant
 
-Product Overview:
-Personal Assitant is a voice-first AI conversational assistant designed for telecom subscribers. When a user is busy, unavailable, or on another call, EVA answers on their behalf — acting as a smart, AI-powered personal assistant.
+When you can't pick up, EVA PA picks up for you.
 
-Key Features:
-- Answers calls when the subscriber is busy, unavailable, or on DND
-- Understands caller intent through natural conversation in 95+ languages
-- Integrates with calendars (Google, Outlook, Apple) to schedule appointments
-- Sends call summaries via WhatsApp, Email, or SMS to the subscriber
-- Learns the subscriber's preferences over time for personalized responses
-- Works on any phone — no app download required, activated via USSD/SMS
+The Problem:
+Every day, people miss calls that matter. Life doesn't pause for phone calls. People are driving, in meetings, spending time with family, or simply too occupied to answer. When they can't pick up, the call just rings out. The caller gets no response, no information, nothing. Important messages are lost, urgent requests go unheard, and callbacks pile up.
+
+When you are driving or commuting, you can't safely answer — the caller gives up and may not call back. When you are in a meeting or at work, your phone is on silent and urgent calls go completely unnoticed. When your phone is switched off or has no network, the caller hears nothing — there is no way to leave information. When you are busy with family or personal time, interrupting personal moments for every call isn't an option — but missing them has consequences.
+
+How EVA Solves This:
+When a subscriber is busy, switched off, or unavailable, EVA PA answers the incoming call on behalf of the subscriber. It talks to the caller like a real person — listens, responds naturally, collects the caller's message, and sends a summary to the subscriber via SMS so they know exactly who called and why.
+
+What EVA Does:
+1. Takes subscriber's calls like a human — EVA PA carries a natural, empathetic conversation with the caller, taking all necessary information on the subscriber's behalf.
+2. Speaks in the caller's language — EVA converses with natural pronunciation and cultural awareness, respecting the sentiments, demographics, and sensitivities of the caller's region.
+3. Sends a call summary to the subscriber — after every call, EVA sends an SMS with who called, what they wanted, and any information they shared.
+4. Alerts instantly for urgent calls — if EVA detects urgency, it sends a flash SMS so the subscriber can act right away.
+5. Learns from every call — EVA learns caller behavior and nature from past interactions and trains itself to respond better in favor of the subscriber, making every subsequent call smoother.
+6. Customizable persona — subscribers can name their EVA, choose a voice, and set a personality tone. If they skip setup, a default persona works out of the box.
+
+How It Works:
+When a subscriber's number is busy, switched off, or goes unanswered, the telecom operator's core network detects the condition and conditionally forwards the call to BlackNGreen's EVA servers. EVA's AI personal assistant answers the call in real time, has a natural conversation with the caller, collects the message, and delivers a call summary back to the subscriber via SMS. The subscriber does not need any app, internet connection, or smartphone — the service works on any phone through the operator's network.
 
 Shortcode / CTA:
 
@@ -144,31 +154,6 @@ Key Features:
 - Available on IVR (dial short-code + mobile number) and Mobile App
 - Works with standard phone calls — no internet needed for the call
 - Subscription via SMS download link, web landing page, or banner ads
-
-Shortcode / CTA:
-
-
-Pricing:
-`,
-  },
-  {
-    id: "magiccall",
-    name: "Magic Call App",
-    icon: "Phone",
-    shortDesc: "Voice changer & caller entertainment app (20M+ downloads)",
-    category: "voice",
-    fullDescription: `Magic Call App - Voice Changer & Caller Entertainment
-
-Product Overview:
-Magic Call is BNG's consumer app that lets users change their voice during live calls, add background sounds, and create fun calling experiences. With 20 million+ downloads, it's one of BNG's most successful consumer products.
-
-Key Features:
-- Real-time voice changing during calls (male, female, child, robot, etc.)
-- Background sound effects (rain, traffic, office, party)
-- Voice recording and sharing
-- Prank call features with pre-set scenarios
-- Works with regular phone calls — no internet needed for the call itself
-- Available on Android and iOS
 
 Shortcode / CTA:
 
@@ -369,7 +354,7 @@ export default function ProductPresets({
   presets = null,
 }: ProductPresetsProps) {
   const displayPresets = (presets?.length ? presets : getFallbackPresets()).filter(
-    (p) => p.id !== "smartconnect"
+    (p) => p.id !== "smartconnect" && p.id !== "magiccall"
   );
   return (
     <div className="space-y-3">

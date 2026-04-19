@@ -3,6 +3,7 @@ import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import ToastProvider from "@/components/ToastProvider";
 import ThemeProvider from "@/components/ThemeProvider";
+import { VoiceProvider } from "@/components/VoiceContext";
 
 export const metadata: Metadata = {
   title: "OBD SuperStar Agent — blackNgreen AI Campaign Generator",
@@ -44,10 +45,12 @@ export default function RootLayout({
       <body className="antialiased min-h-screen">
         <ThemeProvider>
           <ToastProvider>
-            <div className="flex min-h-screen">
-              <Sidebar />
-              <main className="flex-1 min-w-0">{children}</main>
-            </div>
+            <VoiceProvider>
+              <div className="flex min-h-screen">
+                <Sidebar />
+                <main className="flex-1 min-w-0">{children}</main>
+              </div>
+            </VoiceProvider>
           </ToastProvider>
         </ThemeProvider>
       </body>

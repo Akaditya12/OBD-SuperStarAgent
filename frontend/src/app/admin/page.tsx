@@ -331,7 +331,7 @@ export default function AdminPage() {
                 <div className="flex gap-2">
                     {tab === "users" && (
                         <>
-                            <button onClick={fetchUsers} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--card)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] text-sm transition-colors">
+                            <button onClick={() => fetchUsers()} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--card)] hover:bg-[var(--accent-subtle)] border border-[var(--card-border)] text-sm transition-colors">
                                 <RefreshCw className="w-4 h-4" />
                             </button>
                             <button onClick={() => setShowCreateForm(!showCreateForm)} className="flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-white shadow-sm transition-all text-sm" style={{ background: `linear-gradient(135deg, var(--gradient-from), var(--gradient-to))` }}>
@@ -569,9 +569,9 @@ export default function AdminPage() {
                                     <div>
                                         <label className={labelCls}>Default TTS Engine</label>
                                         <div className="flex gap-2">
-                                            {(["elevenlabs", "murf", "edge-tts"] as const).map((eng) => (
+                                            {(["elevenlabs", "edge-tts"] as const).map((eng) => (
                                                 <button key={eng} type="button" onClick={() => updateConfig("default_tts_engine", eng)} className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all ${config.default_tts_engine === eng ? "border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]" : "border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--card-border-hover)]"}`}>
-                                                    {eng === "elevenlabs" ? "ElevenLabs" : eng === "murf" ? "Murf AI" : "Free TTS"}
+                                                    {eng === "elevenlabs" ? "ElevenLabs" : "Free TTS"}
                                                 </button>
                                             ))}
                                         </div>
