@@ -66,6 +66,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+class _NoisyEndpointFilter(logging.Filter):
+    """Drop uvicorn access logs for high-frequency polling endpoints we don't need to see."""
+
+    _SILENCED = ("/api/activity", "/api/presence")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(path in msg for path in self._SILENCED)
+
+
+logging.getLogger("uvicorn.access").addFilter(_NoisyEndpointFilter())
+
 # ── App ──
 app = FastAPI(
     title="OBD SuperStar Agent",
