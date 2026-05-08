@@ -275,11 +275,11 @@ async def health_check():
 @app.get("/api/check-keys")
 async def check_keys(validate: bool = False):
     """Report whether API keys are loaded (no values exposed). ?validate=1 checks ElevenLabs API accepts the key."""
-    from backend.config import ELEVENLABS_API_KEY, AZURE_OPENAI_API_KEY, SUPABASE_URL
+    from backend.config import ELEVENLABS_API_KEY, AZURE_OPENAI_API_KEY, MYSQL_URL
     out = {
         "elevenlabs": "loaded" if (ELEVENLABS_API_KEY and len(ELEVENLABS_API_KEY) > 10) else "missing",
         "azure_openai": "loaded" if (AZURE_OPENAI_API_KEY and len(AZURE_OPENAI_API_KEY) > 10) else "missing",
-        "supabase": "loaded" if (SUPABASE_URL and len(SUPABASE_URL) > 5) else "missing",
+        "mysql": "loaded" if (MYSQL_URL and len(MYSQL_URL) > 5) else "missing",
     }
     if validate and ELEVENLABS_API_KEY and len(ELEVENLABS_API_KEY) > 10:
         try:
@@ -613,14 +613,9 @@ async def logout():
 @app.get("/api/admin/users")
 async def list_users():
     """List all users (Admin only)."""
-    from backend.database import supabase
-    if not supabase:
-        return JSONResponse(status_code=500, content={"error": "Supabase not configured"})
-        
+    from backend.database import list_users as db_list_users
     try:
-        # Don't return password hashes to the frontend
-        res = supabase.table("users").select("id, username, email, role, team, is_active, created_at").order("created_at").execute()
-        return {"users": res.data}
+        return {"users": db_list_users()}
     except Exception as e:
         logger.error(f"Failed to list users: {e}")
         return JSONResponse(status_code=500, content={"error": "Database error"})
@@ -628,48 +623,27 @@ async def list_users():
 @app.post("/api/admin/users")
 async def create_user(request: Request):
     """Create a new user (Admin only)."""
-    from backend.database import supabase
+    from backend.database import create_user as db_create_user, log_audit
     import bcrypt
-    
-    if not supabase:
-        return {"error": "Supabase not configured"}
-        
+
     body = await request.json()
     username = body.get("username", "").strip()
     email = body.get("email", "").strip()
     password = body.get("password", "")
     role = body.get("role", "member")
     team = body.get("team", "default").strip()
-    
+
     if not username or not email or not password:
         return JSONResponse(status_code=400, content={"error": "Missing required fields"})
-        
+
     salt = bcrypt.gensalt()
     password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
-    
+
     try:
-        user_data = {
-            "username": username,
-            "email": email,
-            "password_hash": password_hash,
-            "role": role,
-            "team": team,
-            "is_active": True
-        }
-        res = supabase.table("users").insert(user_data).execute()
-        
-        # Log action
+        new_user = db_create_user(username, email, password_hash, role, team=team, is_active=True)
         admin_username = getattr(request.state, "username", "unknown")
-        supabase.table("audit_log").insert({
-            "admin_username": admin_username,
-            "action": "create_user",
-            "target_user": username,
-            "details": {"role": role, "team": team}
-        }).execute()
-        
-        # Don't return password hash
-        new_user = res.data[0].copy()
-        new_user.pop("password_hash", None)
+        log_audit(admin_username, "create_user", target_user=username,
+                  details={"role": role, "team": team})
         return {"user": new_user}
     except Exception as e:
         logger.error(f"Failed to create user: {e}")
@@ -678,47 +652,33 @@ async def create_user(request: Request):
 @app.put("/api/admin/users/{user_id}")
 async def update_user(user_id: str, request: Request):
     """Update a user (Admin only)."""
-    from backend.database import supabase
+    from backend.database import update_user as db_update_user, get_user_by_id, log_audit
     import bcrypt
-    
-    if not supabase:
-        return {"error": "Supabase not configured"}
-        
+
     body = await request.json()
-    updates = {}
-    
-    if "role" in body: updates["role"] = body["role"]
-    if "team" in body: updates["team"] = body["team"].strip()
-    if "is_active" in body: updates["is_active"] = body["is_active"]
+    kwargs: dict = {}
+    if "role" in body: kwargs["role"] = body["role"]
+    if "team" in body: kwargs["team"] = body["team"].strip()
+    if "is_active" in body: kwargs["is_active"] = bool(body["is_active"])
     if "password" in body and body["password"]:
         salt = bcrypt.gensalt()
-        updates["password_hash"] = bcrypt.hashpw(body["password"].encode('utf-8'), salt).decode('utf-8')
-        
-    if not updates:
+        kwargs["password_hash"] = bcrypt.hashpw(body["password"].encode('utf-8'), salt).decode('utf-8')
+
+    if not kwargs:
         return {"message": "No updates provided"}
-        
+
     try:
-        res = supabase.table("users").update(updates).eq("id", user_id).execute()
-        
-        # Log action
+        updated = db_update_user(user_id, **kwargs)
+        if not updated:
+            return JSONResponse(status_code=404, content={"error": "User not found"})
+
         admin_username = getattr(request.state, "username", "unknown")
-        target_username = res.data[0].get("username") if res.data else user_id
-        
-        log_details = updates.copy()
-        log_details.pop("password_hash", None)
+        log_details = {k: v for k, v in kwargs.items() if k != "password_hash"}
         if "password" in body and body["password"]:
             log_details["password_reset"] = True
-        
-        supabase.table("audit_log").insert({
-            "admin_username": admin_username,
-            "action": "update_user",
-            "target_user": target_username,
-            "details": log_details
-        }).execute()
-        
-        updated_user = res.data[0].copy() if res.data else {}
-        updated_user.pop("password_hash", None)
-        return {"user": updated_user}
+        log_audit(admin_username, "update_user", target_user=updated.get("username", user_id),
+                  details=log_details)
+        return {"user": updated}
     except Exception as e:
         logger.error(f"Failed to update user: {e}")
         return JSONResponse(status_code=500, content={"error": "Database error"})
@@ -726,24 +686,14 @@ async def update_user(user_id: str, request: Request):
 @app.delete("/api/admin/users/{user_id}")
 async def deactivate_user(user_id: str, request: Request):
     """Deactivate a user (Admin only, soft delete)."""
-    from backend.database import supabase
-    if not supabase:
-        return {"error": "Supabase not configured"}
-        
+    from backend.database import update_user as db_update_user, log_audit
+
     try:
-        res = supabase.table("users").update({"is_active": False}).eq("id", user_id).execute()
-        
-        # Log action
+        updated = db_update_user(user_id, is_active=False)
+        if not updated:
+            return JSONResponse(status_code=404, content={"error": "User not found"})
         admin_username = getattr(request.state, "username", "unknown")
-        target_username = res.data[0].get("username") if res.data else user_id
-        
-        supabase.table("audit_log").insert({
-            "admin_username": admin_username,
-            "action": "deactivate_user",
-            "target_user": target_username,
-            "details": {}
-        }).execute()
-        
+        log_audit(admin_username, "deactivate_user", target_user=updated.get("username", user_id))
         return {"message": "User deactivated"}
     except Exception as e:
         logger.error(f"Failed to deactivate user: {e}")
@@ -863,12 +813,11 @@ async def update_agent_prompt(agent_key: str, request: Request):
 
     db_key = f"agent_prompt_{agent_key}"
     if not prompt or not prompt.strip():
-        from backend.database import supabase as _sb
-        if _sb:
-            try:
-                _sb.table("app_config").delete().eq("key", db_key).execute()
-            except Exception as e:
-                return JSONResponse(status_code=500, content={"error": str(e)})
+        from backend.database import delete_pipeline_config
+        try:
+            delete_pipeline_config(db_key)
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
         return {"status": "reset", "agent": agent_key}
 
     try:

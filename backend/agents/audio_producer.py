@@ -34,7 +34,6 @@ from backend.config import (
     get_elevenlabs_headers,
     elevenlabs_401_is_tts_only,
 )
-from backend.database import supabase
 
 from .base import BaseAgent
 
@@ -1451,32 +1450,9 @@ class AudioProducerAgent(BaseAgent):
                     except Exception as wav_err:
                         logger.warning(f"[{self.name}] WAV conversion failed: {wav_err}")
 
-                if supabase:
-                    try:
-                        file_path = Path(result["file_path"])
-                        bucket_name = "audio-files"
-                        session_id = str(job["path"].parent.name)
-                        storage_path = f"{session_id}/{file_path.name}"
-                        content_type = "audio/wav" if file_path.suffix.lower() == ".wav" else "audio/mpeg"
-
-                        with open(file_path, "rb") as f:
-                            supabase.storage.from_(bucket_name).upload(
-                                path=storage_path,
-                                file=f,
-                                file_options={"content-type": content_type},
-                            )
-
-                        public_url = supabase.storage.from_(bucket_name).get_public_url(storage_path)
-                        result["public_url"] = public_url
-                        logger.debug(f"[{self.name}] Uploaded {file_path.name} to Supabase Storage")
-
-                        try:
-                            file_path.unlink()
-                        except OSError:
-                            pass
-                    except Exception as upload_err:
-                        logger.error(f"[{self.name}] Supabase upload failed for {job['path'].name}: {upload_err}")
-                        
+                # Audio stays on local filesystem under backend/outputs/{session_id}/ and
+                # is served by FastAPI's /outputs static mount (or /api/audio/{sid}/{file}).
+                # public_url intentionally left empty so the frontend uses the backend URL.
                 return result
             except Exception as e:
                 err_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)"

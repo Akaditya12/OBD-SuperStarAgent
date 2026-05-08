@@ -1,4 +1,4 @@
-"""JWT-based authentication for team access (Supabase DB-backed with local fallback)."""
+"""JWT-based authentication for team access (MySQL-backed with local fallback)."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ try:
 except ImportError:
     bcrypt = None  # type: ignore[assignment]
 
-from backend.database import supabase
-from backend.config import SUPABASE_URL
+from backend.config import MYSQL_URL
+from backend.database import get_user_by_username
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ JWT_SECRET = os.getenv("JWT_SECRET", "obd-superstar-default-secret-change-me").s
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 72  # 3 days
 
-# Optional env-var fallback for local dev (single-user, no Supabase)
+# Optional env-var fallback for local dev (single-user, no DB)
 _FALLBACK_USERNAME = os.getenv("LOGIN_USERNAME", "")
 _FALLBACK_PASSWORD = os.getenv("LOGIN_PASSWORD", "")
 
@@ -37,8 +37,8 @@ PUBLIC_PATHS = {
 }
 
 def auth_enabled() -> bool:
-    """Auth is enabled if Supabase is configured OR env-var fallback is set."""
-    if SUPABASE_URL and supabase:
+    """Auth is enabled if a DB is configured OR env-var fallback is set."""
+    if MYSQL_URL:
         return True
     return bool(_FALLBACK_USERNAME and _FALLBACK_PASSWORD)
 
@@ -52,17 +52,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     )
 
 def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
-    """Verify credentials against the Supabase users table or env-var fallback."""
-    if supabase:
+    """Verify credentials against the MySQL users table or env-var fallback."""
+    if MYSQL_URL:
         try:
-            response = (
-                supabase.table("users")
-                .select("*")
-                .eq("username", username)
-                .maybe_single()
-                .execute()
-            )
-            user_record = response.data
+            user_record = get_user_by_username(username)
             if not user_record:
                 return None
             if not user_record.get("is_active", True):
@@ -75,7 +68,7 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
             logger.error("Error authenticating user %s: %s", username, e)
             return None
 
-    # Env-var fallback (local dev, no Supabase)
+    # Env-var fallback (local dev, no MySQL)
     if _FALLBACK_USERNAME and username == _FALLBACK_USERNAME and password == _FALLBACK_PASSWORD:
         return {
             "id": "local",
@@ -134,7 +127,7 @@ def get_token_from_websocket(ws: WebSocket) -> Optional[str]:
 async def auth_middleware(request: Request, call_next):
     """Middleware that protects API routes with JWT auth.
 
-    Skips auth if Supabase is not configured (local dev fallback).
+    Skips auth if no DB is configured and no env-var fallback is set (local dev).
     """
     path = request.url.path
 

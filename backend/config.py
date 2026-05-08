@@ -87,7 +87,12 @@ def get_live_config() -> dict:
     from backend.database import get_pipeline_config
     return get_pipeline_config()
 
-# --- Supabase Configuration ---
+# --- Database Configuration ---
+# Primary: MySQL (local). Fallback: SQLite when MYSQL_URL is blank.
+MYSQL_URL = _env("MYSQL_URL")
+
+# Legacy Supabase env vars are still read but the app no longer uses them
+# for DB or storage. Kept as empty strings so old imports don't crash.
 SUPABASE_URL = _env("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = _env("SUPABASE_SERVICE_KEY")
 SUPABASE_ANON_KEY = _env("SUPABASE_ANON_KEY")

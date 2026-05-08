@@ -37,3 +37,8 @@ bkp.txty
 # Local dev logs and test artifacts
 *.log
 zambia_ivr.wav
+
+# Migration data dumps (contain hashed credentials and historical data)
+# The MySQL schema file (migration/mysql_schema.sql) IS committed; only the dumps are ignored.
+migration/supabase_data.sql
+migration/supabase_schema.sql
