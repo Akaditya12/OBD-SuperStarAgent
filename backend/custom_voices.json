@@ -9,7 +9,7 @@
       "age": ""
     },
     "category": "custom",
-    "preview_url": null,
+    "preview_url": "/api/voices/0UZ29F1kNDvmelKG8QCM/preview",
     "best_for_regions": []
   },
   {
@@ -22,7 +22,7 @@
       "age": ""
     },
     "category": "custom",
-    "preview_url": "/api/voice-preview/Ms9OTvWb99V6DwRHZn6q.mp3",
+    "preview_url": "/api/voices/Ms9OTvWb99V6DwRHZn6q/preview",
     "best_for_regions": []
   },
   {
@@ -35,7 +35,7 @@
       "age": ""
     },
     "category": "custom",
-    "preview_url": null,
+    "preview_url": "/api/voices/hqFZL8ZnNxQK2qFcuxRL/preview",
     "best_for_regions": []
   },
   {
@@ -48,7 +48,7 @@
       "age": ""
     },
     "category": "custom",
-    "preview_url": null,
+    "preview_url": "/api/voices/mBUB5zYuPwfVE6DTcEjf/preview",
     "best_for_regions": []
   },
   {
@@ -61,7 +61,20 @@
       "age": ""
     },
     "category": "custom",
-    "preview_url": null,
+    "preview_url": "/api/voices/LWFgMHXb8m0uANBUpzlq/preview",
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "YkHbp3e8G9cEwq8igiKg",
+    "name": "Foley",
+    "description": "Strong,Advertisement.",
+    "labels": {
+      "accent": "British",
+      "gender": "male",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": "/api/voices/YkHbp3e8G9cEwq8igiKg/preview",
     "best_for_regions": []
   }
 ]

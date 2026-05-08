@@ -351,9 +351,11 @@ async def list_voices():
                             "preview_url": v.get("preview_url", ""),
                             "best_for_regions": curated.get("best_for_regions", []),
                         })
-                    # Append saved custom voices
+                    # Append saved custom voices, ensuring every one has a usable preview URL
                     for cv in _load_custom_voices():
                         if not any(existing["voice_id"] == cv["voice_id"] for existing in voices):
+                            if not cv.get("preview_url"):
+                                cv = {**cv, "preview_url": f"/api/voices/{cv['voice_id']}/preview"}
                             voices.append(cv)
                     result = {"voices": voices, "source": "api", "total": len(voices)}
                     _voices_cache["data"] = result
@@ -375,10 +377,12 @@ async def list_voices():
             "best_for_regions": v.get("best_for_regions", []),
         })
 
-    # Append saved custom voices
+    # Append saved custom voices, ensuring every one has a usable preview URL
     for v in _load_custom_voices():
         # Avoid duplicates (custom voice might match an API/curated voice)
         if not any(existing["voice_id"] == v["voice_id"] for existing in voices):
+            if not v.get("preview_url"):
+                v = {**v, "preview_url": f"/api/voices/{v['voice_id']}/preview"}
             voices.append(v)
 
     result = {"voices": voices, "source": "curated", "total": len(voices)}
@@ -520,6 +524,83 @@ async def serve_voice_preview(filename: str):
         filename=filename,
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+_PREVIEW_TEXT = "Hello, this is a voice preview from ElevenLabs. How does this sound?"
+
+
+@app.get("/api/voices/{voice_id}/preview")
+async def lazy_voice_preview(voice_id: str):
+    """Serve a voice preview, generating + caching it on first request.
+
+    For any voice_id (typically custom voices missing a preview), this:
+    1. Returns the cached MP3 if it exists.
+    2. Otherwise calls ElevenLabs TTS, saves the MP3 to disk, updates
+       custom_voices.json so subsequent /api/voices responses include the URL,
+       and serves the freshly generated audio.
+    """
+    import base64 as _b64
+    import httpx
+    from backend.config import ELEVENLABS_API_KEY
+
+    safe_id = voice_id.strip()
+    if not safe_id or "/" in safe_id or ".." in safe_id:
+        return JSONResponse(status_code=400, content={"error": "Invalid voice_id"})
+
+    file_path = _VOICE_PREVIEWS_DIR / f"{safe_id}.mp3"
+    if file_path.exists() and file_path.stat().st_size > 0:
+        return FileResponse(
+            path=str(file_path),
+            media_type="audio/mpeg",
+            filename=f"{safe_id}.mp3",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    if not ELEVENLABS_API_KEY:
+        return JSONResponse(status_code=400, content={"error": "ElevenLabs API key not configured"})
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{safe_id}",
+                headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
+                json={"text": _PREVIEW_TEXT, "model_id": "eleven_v3"},
+                timeout=30.0,
+            )
+            if r.status_code == 401:
+                return JSONResponse(status_code=401, content={"error": "ElevenLabs API key invalid"})
+            if r.status_code == 404:
+                return JSONResponse(status_code=404, content={"error": f"Voice ID '{safe_id}' not found"})
+            if r.status_code != 200:
+                return JSONResponse(status_code=r.status_code, content={"error": f"ElevenLabs error: {r.text[:200]}"})
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(r.content)
+
+        # Update custom_voices.json so the list endpoint reflects the cached URL
+        try:
+            cvs = _load_custom_voices()
+            changed = False
+            for cv in cvs:
+                if cv.get("voice_id") == safe_id and not cv.get("preview_url"):
+                    cv["preview_url"] = f"/api/voices/{safe_id}/preview"
+                    changed = True
+                    break
+            if changed:
+                _save_custom_voices(cvs)
+                _voices_cache["data"] = None
+                _voices_cache["ts"] = 0
+        except Exception as persist_err:
+            logger.warning("Failed to persist preview_url for %s: %s", safe_id, persist_err)
+
+        return FileResponse(
+            path=str(file_path),
+            media_type="audio/mpeg",
+            filename=f"{safe_id}.mp3",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Preview generation failed: {str(e)}"})
 
 
 @app.delete("/api/voices/{voice_id}")
