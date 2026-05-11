@@ -806,6 +806,13 @@ async def admin_cleanup(request: Request):
     }
 
 
+@app.get("/api/admin/r2-usage")
+async def admin_r2_usage():
+    """Report R2 bucket usage (size + object count). Admin only."""
+    from backend.storage import bucket_usage
+    return bucket_usage()
+
+
 def _cleanup_outputs(max_age_hours: float = 2) -> tuple[int, int]:
     """Remove session output dirs older than *max_age_hours*. Returns (count, bytes)."""
     import time

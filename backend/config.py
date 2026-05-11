@@ -87,6 +87,19 @@ def get_live_config() -> dict:
     from backend.database import get_pipeline_config
     return get_pipeline_config()
 
+# --- Cloudflare R2 (audio storage) ---
+# Audio files are written locally under backend/outputs AND uploaded to R2
+# (when configured). Frontend prefers public_url; falls back to local serve
+# if R2 upload is disabled or failed.
+R2_ACCOUNT_ID = _env("R2_ACCOUNT_ID")
+R2_ACCESS_KEY = _env("R2_ACCESS_KEY")
+R2_SECRET_KEY = _env("R2_SECRET_KEY")
+R2_BUCKET = _env("R2_BUCKET")
+R2_PUBLIC_BASE_URL = _env("R2_PUBLIC_BASE_URL").rstrip("/")
+
+R2_ENABLED = all([R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL])
+
+
 # --- Database Configuration ---
 # Primary: MySQL (local). Fallback: SQLite when MYSQL_URL is blank.
 MYSQL_URL = _env("MYSQL_URL")

@@ -1450,9 +1450,20 @@ class AudioProducerAgent(BaseAgent):
                     except Exception as wav_err:
                         logger.warning(f"[{self.name}] WAV conversion failed: {wav_err}")
 
-                # Audio stays on local filesystem under backend/outputs/{session_id}/ and
-                # is served by FastAPI's /outputs static mount (or /api/audio/{sid}/{file}).
-                # public_url intentionally left empty so the frontend uses the backend URL.
+                # Persist the local file (kept as a safety copy) and try to upload
+                # to Cloudflare R2 so the audio is reachable even when the backend
+                # is offline. If R2 isn't configured or the upload fails, the local
+                # file is still served via FastAPI's /api/audio/{sid}/{file}.
+                try:
+                    from backend.storage import upload_audio as _r2_upload
+                    file_path = Path(result["file_path"])
+                    session_id = file_path.parent.name
+                    key = f"{session_id}/{file_path.name}"
+                    public_url = _r2_upload(file_path, key)
+                    if public_url:
+                        result["public_url"] = public_url
+                except Exception as _r2_err:
+                    logger.debug(f"[{self.name}] R2 upload skipped: {_r2_err}")
                 return result
             except Exception as e:
                 err_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (no message)"
