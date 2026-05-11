@@ -144,6 +144,29 @@ async def _startup_elevenlabs_check():
         logger.debug("ElevenLabs startup check skipped: %s", e)
 
 
+@app.on_event("startup")
+async def _startup_r2_usage_monitor():
+    """Kick off a background loop that logs R2 bucket usage every hour.
+
+    Tunables (all optional env vars):
+      R2_USAGE_CHECK_INTERVAL_SECONDS  default 3600
+      R2_USAGE_WARN_GB                 default 8.0   (WARNING log level)
+      R2_USAGE_CRIT_GB                 default 9.5   (ERROR log level)
+    """
+    from backend.config import R2_ENABLED
+    if not R2_ENABLED:
+        return
+    from backend.storage import periodic_usage_check
+    interval = int(os.getenv("R2_USAGE_CHECK_INTERVAL_SECONDS", "3600"))
+    warn = float(os.getenv("R2_USAGE_WARN_GB", "8.0"))
+    crit = float(os.getenv("R2_USAGE_CRIT_GB", "9.5"))
+    asyncio.create_task(periodic_usage_check(interval, warn, crit))
+    logger.info(
+        "R2 usage monitor started (interval=%ds, warn=%.1fGB, crit=%.1fGB)",
+        interval, warn, crit,
+    )
+
+
 # ── In-memory session store ──
 sessions: dict[str, dict[str, Any]] = {}
 

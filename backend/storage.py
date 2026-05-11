@@ -121,6 +121,47 @@ def delete_audio(key: str) -> bool:
         return False
 
 
+async def periodic_usage_check(
+    interval_seconds: int = 3600,
+    warn_threshold_gb: float = 8.0,
+    crit_threshold_gb: float = 9.5,
+) -> None:
+    """Run forever, logging R2 bucket usage at fixed intervals.
+
+    Logs INFO under threshold, WARNING at >= warn_threshold_gb, ERROR at
+    >= crit_threshold_gb. Boto3 calls run in a thread so they don't block
+    the event loop.
+    """
+    if not R2_ENABLED:
+        return
+    import asyncio
+    while True:
+        try:
+            usage = await asyncio.to_thread(bucket_usage)
+            if usage.get("enabled") and "total_gb" in usage:
+                gb = float(usage["total_gb"])
+                count = int(usage["object_count"])
+                pct = float(usage.get("free_tier_used_percent", 0))
+                if gb >= crit_threshold_gb:
+                    logger.error(
+                        "R2 CRITICAL: %.2f GB / 10 GB (%.1f%%) — %d objects. Approaching free-tier cap.",
+                        gb, pct, count,
+                    )
+                elif gb >= warn_threshold_gb:
+                    logger.warning(
+                        "R2 WARNING: %.2f GB / 10 GB (%.1f%%) — %d objects. Consider cleanup.",
+                        gb, pct, count,
+                    )
+                else:
+                    logger.info(
+                        "R2 usage: %.2f GB / 10 GB (%.1f%%) — %d objects.",
+                        gb, pct, count,
+                    )
+        except Exception as e:
+            logger.warning("R2 periodic usage check failed: %s", e)
+        await asyncio.sleep(max(60, interval_seconds))
+
+
 def bucket_usage() -> dict[str, Any]:
     """List the bucket and return total bytes + object count.
 
