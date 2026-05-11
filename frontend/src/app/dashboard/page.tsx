@@ -24,7 +24,7 @@ import StatsCards from "@/components/StatsCards";
 import CommentThread from "@/components/CommentThread";
 import ActivityFeed from "@/components/ActivityFeed";
 import { useToast } from "@/components/ToastProvider";
-import { forceDownload } from "@/lib/utils";
+import { forceDownload, sanitizeFilename } from "@/lib/utils";
 import type {
   Campaign,
   CampaignDetail,
@@ -34,6 +34,22 @@ import type {
   Script,
   AudioFile,
 } from "@/lib/types";
+
+// Download an audio file in the requested format. Backend transcodes if the
+// stored file is in a different format than requested. The downloaded file
+// is named after the campaign (with section/variant suffix if relevant).
+const downloadAudioAs = (audioUrl: string, baseName: string, fmt: "mp3" | "wav") => {
+  const sep = audioUrl.includes("?") ? "&" : "?";
+  forceDownload(`${audioUrl}${sep}fmt=${fmt}`, `${sanitizeFilename(baseName)}.${fmt}`);
+};
+
+/** Strip variant_N_voiceM_ prefix from generated filenames to get a section label. */
+const audioSectionLabel = (fileName: string | undefined): string => {
+  if (!fileName) return "";
+  return fileName
+    .replace(/\.(mp3|wav)$/i, "")
+    .replace(/^variant_\d+_voice\d+_/, "");
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -607,13 +623,24 @@ export default function DashboardPage() {
                                               <p className="text-sm font-medium text-[var(--text-primary)]">{stvVoice || "Audio"}</p>
                                               <p className="text-[10px] text-[var(--text-tertiary)]">{af.file_name}</p>
                                             </div>
-                                            <button
-                                              onClick={() => forceDownload(audioUrl, af.file_name || `audio.${stvFormat}`)}
-                                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium text-[var(--accent)] bg-[var(--accent-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all border border-[var(--accent)]/20"
-                                            >
-                                              <Download className="w-3 h-3" />
-                                              Download
-                                            </button>
+                                            <div className="flex items-center gap-1.5">
+                                              <button
+                                                onClick={() => downloadAudioAs(audioUrl, campaign.name, "mp3")}
+                                                title="Download as MP3"
+                                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-[var(--accent)] bg-[var(--accent-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all border border-[var(--accent)]/20"
+                                              >
+                                                <Download className="w-3 h-3" />
+                                                MP3
+                                              </button>
+                                              <button
+                                                onClick={() => downloadAudioAs(audioUrl, campaign.name, "wav")}
+                                                title="Download as WAV"
+                                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-[var(--accent)] bg-[var(--accent-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all border border-[var(--accent)]/20"
+                                              >
+                                                <Download className="w-3 h-3" />
+                                                WAV
+                                              </button>
+                                            </div>
                                           </div>
                                         );
                                       })}
@@ -917,10 +944,18 @@ export default function DashboardPage() {
                                                 {label}
                                               </button>
                                               <button
-                                                onClick={() => forceDownload(audioUrl, af.file_name || `audio.${campaignAudioFormat}`)}
-                                                className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
+                                                onClick={() => downloadAudioAs(audioUrl, `${campaign.name}_v${vid}_${audioSectionLabel(af.file_name)}`, "mp3")}
+                                                title="Download MP3"
+                                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
                                               >
-                                                <Download className="w-2.5 h-2.5" />
+                                                MP3
+                                              </button>
+                                              <button
+                                                onClick={() => downloadAudioAs(audioUrl, `${campaign.name}_v${vid}_${audioSectionLabel(af.file_name)}`, "wav")}
+                                                title="Download WAV"
+                                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
+                                              >
+                                                WAV
                                               </button>
                                             </div>
                                           );

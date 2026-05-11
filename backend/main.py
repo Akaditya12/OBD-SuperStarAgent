@@ -1244,24 +1244,40 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
 
     actual_ext = file_path.suffix.lower()
 
-    if fmt == "wav" and actual_ext == ".mp3":
+    # On-the-fly transcode when the requested format differs from the stored file.
+    if fmt in ("mp3", "wav") and actual_ext != f".{fmt}":
         try:
             from pydub import AudioSegment
             import io as _io
-            seg = AudioSegment.from_mp3(str(file_path))
-            buf = _io.BytesIO()
-            seg.export(buf, format="wav")
-            buf.seek(0)
-            wav_name = file_path.stem + ".wav"
             from fastapi.responses import StreamingResponse
+
+            if actual_ext == ".mp3":
+                seg = AudioSegment.from_mp3(str(file_path))
+            elif actual_ext == ".wav":
+                seg = AudioSegment.from_wav(str(file_path))
+            else:
+                seg = AudioSegment.from_file(str(file_path))
+
+            buf = _io.BytesIO()
+            export_kwargs = {"format": fmt}
+            if fmt == "mp3":
+                # Match the bitrate we use for natively-generated MP3s
+                export_kwargs["bitrate"] = "320k"
+            seg.export(buf, **export_kwargs)
+            buf.seek(0)
+            out_name = file_path.stem + f".{fmt}"
+            media = "audio/mpeg" if fmt == "mp3" else "audio/wav"
             return StreamingResponse(
                 buf,
-                media_type="audio/wav",
-                headers={"Content-Disposition": f"attachment; filename={wav_name}"},
+                media_type=media,
+                headers={
+                    "Content-Disposition": f"attachment; filename={out_name}",
+                    "Cache-Control": "public, max-age=86400, immutable",
+                },
             )
         except Exception as e:
-            logger.error("WAV conversion failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": "WAV conversion failed"})
+            logger.error("Audio transcode (%s -> %s) failed: %s", actual_ext, fmt, e)
+            return JSONResponse(status_code=500, content={"error": f"{fmt.upper()} conversion failed"})
 
     media_type = "audio/wav" if actual_ext == ".wav" else "audio/mpeg"
     return FileResponse(
