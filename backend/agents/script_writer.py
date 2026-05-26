@@ -67,11 +67,63 @@ SCRIPT STRUCTURE (each variant):
 - polite_closure: Graceful exit (~10 words).
 - full_script: hook + body + cta combined into one string.
 
-EMOTION TAGS (use 3-5 per script, ONLY these square-bracket tags): \
-[excited], [curious], [warm], [gentle], [whispers], [laughs], [pause], \
-[short pause], [cheerfully], [mischievously], [playfully], [sigh], [gasps], \
-[soft], [energetic], [sincere], [urgent].
-Also use CAPITALIZATION for emphasis and ellipses (...) for dramatic pauses.
+EMOTION TAGS — placement and discipline (these tags drive ElevenLabs v3 voice delivery; treat them with the same care as the words themselves):
+
+Approved tags ONLY — never invent new ones, never use tags outside this list:
+- Energy / excitement: [excited], [energetic], [cheerfully], [playfully]
+- Curiosity / intrigue: [curious], [mischievously], [whispers]
+- Warmth / connection: [warm], [gentle], [sincere], [soft]
+- Reactions: [laughs], [sigh], [gasps]
+- Urgency: [urgent]
+- Pacing (breath, NOT emotion): [pause], [short pause]
+
+PLACEMENT — these are HARD requirements (violations break voice delivery):
+- A tag goes IMMEDIATELY BEFORE the words it should color. Never after the sentence, never as a paragraph header divorced from text.
+  GOOD: "[excited] Imagine winning a thousand kwacha today!"
+  BAD:  "Imagine winning a thousand kwacha today! [excited]"
+- NEVER stack tags ("[excited][playfully] ..."). Pick ONE — stacked tags get ignored by the TTS engine.
+- Tags shape ~1-2 sentences of tone. Don't sprinkle them mid-clause as decoration.
+- One tag per emotional beat, not per sentence.
+
+MULTILINGUAL — tags work IDENTICALLY across all languages (English, Tamil, Hindi, Swahili, Yoruba, Hausa, Amharic, Arabic, French, Tagalog, Bengali, Telugu, Kinyarwanda, etc.):
+- Tag names stay in ENGLISH square brackets regardless of the script's language. The transliteration rule applies to local-language words only — it does NOT apply to emotion tags.
+  GOOD (Tamil):    "[curious] Theriyumaa, ungal voicelaye paadalaam!"
+  GOOD (Swahili):  "[excited] Hebu fikiria, sauti yako inabadilika sasa!"
+  GOOD (Hindi):    "[playfully] Arre, kya aap sapne dekh rahe hain?"
+  GOOD (Amharic):  "[urgent] Ahun yitebiku, idilachehu ke 5 daqiqa beful yiqeral!"
+  BAD:             "[ம் ஆர்வம்] ..." (do NOT translate the tag itself)
+  BAD:             "[curiosus] ..." (do NOT invent localized variants)
+- The same approved tag list applies to every language. Don't add new tags for cultural concepts — choose the closest fit from the list ([warm] / [sincere] for respect, [playfully] for teasing, [urgent] for now-or-never, etc.).
+- The PER-SECTION and EMOTIONAL ARC rules are universal — they hold in every language.
+
+PER-SECTION USAGE (target placement, not rigid):
+- hook       — 1 tag at the very start. Choose a high-engagement opener: [curious], [excited], [playfully], [whispers], [laughs].
+- body       — 1 tag mid-section, matching the beat: [sincere] for trust, [warm] for empathy, [energetic] for benefit reveal.
+- cta        — 1 tag, MUST be activating: [urgent], [excited], or [energetic]. NEVER [soft] or [gentle] in a CTA — they kill momentum.
+- fallback_1 — [urgent] or [energetic] (this is the "you might be missing out" beat).
+- fallback_2 — [sincere] (social proof / reassurance) or [warm] (gentle persuasion). Pick one.
+- polite_closure — [warm], [gentle], or [sincere]. Soft landing only.
+
+EMOTIONAL ARC across the script:
+- HOOK pulls attention (curious / excited / intrigue).
+- BODY builds trust + shows value (warm / sincere / energetic).
+- CTA drives action (urgent / excited).
+- FALLBACKS escalate urgency then reassure.
+- CLOSURE leaves a positive feeling (warm / gentle).
+
+PACING DISCIPLINE:
+- [pause] adds ~0.8s of silence — use AT MOST ONCE per full script, on a single dramatic beat (e.g. right before the price reveal). Never inside a CTA.
+- [short pause] adds ~0.3s — max twice per script. Prefer "..." ellipses for shorter rhetorical pauses.
+- Do not place pacing tags inside the CTA — every fraction of a second matters there.
+
+VARIETY:
+- Aim for 3-5 DISTINCT tags across the full script (hook + body + cta). More than 5 dilutes effect.
+- Don't repeat the same tag in adjacent sections — if hook is [excited], body should NOT also be [excited]; pick a different shade ([warm], [sincere], [energetic]).
+- Across the 5 variants, vary the overall tag palette so no two variants sound emotionally identical.
+
+ADDITIONAL TYPOGRAPHY (not tags, but supported):
+- CAPITALIZATION on a key word for emphasis (e.g. "ONLY today", "FREE first month"). Use 1-2 per script max.
+- Ellipses (...) for short mid-sentence rhetorical pauses — better than [short pause] for in-line beats.
 
 CRITICAL — PRODUCT ACCURACY:
 - ONLY mention features, voices, effects, pricing, and capabilities that are EXPLICITLY stated in the product brief. \
