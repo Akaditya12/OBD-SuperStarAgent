@@ -783,7 +783,12 @@ export default function ScriptToVoicePage() {
                   <p className="text-[10px] text-[var(--text-tertiary)]">{finalAudio.voice_name}</p>
                 </div>
                 <button
-                  onClick={() => forceDownload(finalAudio.public_url || finalAudio.url, `script-to-voice.${audioFormat}`)}
+                  onClick={() => {
+                    // Always prefer the same-origin backend URL for downloads (R2 cross-origin
+                    // CORS would fall back to window.open and just play the file in a new tab).
+                    const url = finalAudio.url || finalAudio.public_url;
+                    if (url) forceDownload(url, `script-to-voice.${audioFormat}`);
+                  }}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-[var(--accent)] hover:brightness-110 transition-all"
                 >
                   <Download className="w-3.5 h-3.5" />

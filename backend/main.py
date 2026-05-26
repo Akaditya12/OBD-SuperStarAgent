@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# Silence "MallocStackLogging: can't turn off..." noise from ffmpeg/lame
+# subprocesses spawned by pydub on macOS. The message fires when the env
+# var is SET (even to "0") because libsystem_malloc tries to disable stack
+# logging that was never enabled. The fix is to UNSET it entirely so child
+# processes inherit an environment without the variable at all.
+import os as _os
+for _k in ("MallocStackLogging", "MallocStackLoggingNoCompact", "MallocScribble"):
+    _os.environ.pop(_k, None)
+
 import asyncio
 import json
 import logging
@@ -1246,21 +1255,15 @@ async def list_audio_files(session_id: str):
 
 @app.get("/api/audio/{session_id}/{filename}")
 async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
-    """Download a specific audio file.
+    """Serve a generated audio file from local disk.
 
-    If the file was uploaded to Supabase Storage, redirect to the CDN URL.
-    Otherwise serve from local disk (local dev fallback).
+    Always serves the local copy so that:
+      - cross-origin fetches (forceDownload) succeed without CORS,
+      - the optional ?fmt= transcode works (mp3 <-> wav),
+      - auth cookies travel correctly.
+    R2 is still used directly by the frontend for inline <audio> playback
+    via public_url; this endpoint is the download path.
     """
-    from starlette.responses import RedirectResponse
-
-    public_url = _find_public_url(session_id, filename)
-    if public_url:
-        return RedirectResponse(
-            url=public_url,
-            status_code=302,
-            headers={"Cache-Control": "public, max-age=86400, immutable"},
-        )
-
     file_path = OUTPUTS_DIR / session_id / filename
     if not file_path.exists():
         wav_alt = file_path.parent / (file_path.stem + ".wav")
@@ -1270,6 +1273,15 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
         elif mp3_alt.exists():
             file_path = mp3_alt
         else:
+            # Local copy is missing — try to proxy from R2 (or whatever public
+            # URL the campaign stored). We fetch from the backend so the client
+            # sees a same-origin response with no CORS surprises, and we can
+            # still transcode the bytes if a different fmt was requested.
+            public_url = _find_public_url(session_id, filename)
+            if public_url:
+                proxied = await _stream_remote_audio(public_url, filename, fmt)
+                if proxied is not None:
+                    return proxied
             return JSONResponse(status_code=404, content={"error": "File not found"})
 
     actual_ext = file_path.suffix.lower()
@@ -1319,23 +1331,101 @@ async def download_audio(session_id: str, filename: str, fmt: str = "mp3"):
 
 
 def _find_public_url(session_id: str, filename: str) -> str | None:
-    """Look up a Supabase public_url for an audio file from in-memory session data."""
-    result = sessions.get(session_id)
-    if not result:
-        for pstate in pipelines.values():
-            r = pstate.result
-            if r and (r.get("session_id") == session_id):
-                result = r
-                break
-    if not result:
-        return None
-    audio = result.get("audio", {})
+    """Look up the stored public_url for an audio file.
+
+    Checks (in order):
+      1. in-memory `sessions` (just-generated)
+      2. running pipelines' result
+      3. MySQL campaigns table (saved campaigns)
+    """
     stem = Path(filename).stem
-    for af in audio.get("audio_files", []):
-        af_stem = Path(af.get("file_name", "")).stem
-        if af_stem == stem and af.get("public_url"):
-            return af["public_url"]
+
+    def _match_in_result(result: dict[str, Any] | None) -> str | None:
+        if not isinstance(result, dict):
+            return None
+        # Search both final audio and hook previews — either may reference this file.
+        for block_key in ("audio", "hook_previews"):
+            block = result.get(block_key) or {}
+            files = block.get("audio_files") if block_key == "audio" else block.get("hook_previews")
+            for af in (files or []):
+                af_stem = Path((af or {}).get("file_name", "")).stem
+                if af_stem == stem and (af or {}).get("public_url"):
+                    return af["public_url"]
+        return None
+
+    # 1) in-memory sessions cache (fresh generations)
+    hit = _match_in_result(sessions.get(session_id))
+    if hit:
+        return hit
+
+    # 2) running pipelines' result
+    for pstate in pipelines.values():
+        hit = _match_in_result(pstate.result if pstate.result and (pstate.result.get("session_id") == session_id) else None)
+        if hit:
+            return hit
+
+    # 3) saved campaigns in MySQL (id often == session_id; fall through silently on miss)
+    try:
+        from backend.database import get_campaign
+        campaign = get_campaign(session_id)
+        if campaign:
+            hit = _match_in_result(campaign.get("result"))
+            if hit:
+                return hit
+    except Exception as e:
+        logger.debug("DB lookup for public_url failed for %s/%s: %s", session_id, filename, e)
     return None
+
+
+async def _stream_remote_audio(url: str, filename: str, fmt: str):
+    """Fetch a remote audio file (typically R2) through the backend and stream
+    it back to the client, transcoding to `fmt` if needed.
+
+    Returns a Starlette response on success, or None on failure (caller decides
+    how to respond — usually a 404).
+    """
+    import httpx
+    from fastapi.responses import StreamingResponse
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.get(url, follow_redirects=True)
+        if r.status_code != 200:
+            logger.warning("Remote audio fetch %s -> HTTP %s", url, r.status_code)
+            return None
+        content = r.content
+        source_ext = Path(filename).suffix.lower().lstrip(".") or "mp3"
+        target_ext = fmt if fmt in ("mp3", "wav") else source_ext
+
+        if source_ext != target_ext:
+            try:
+                from pydub import AudioSegment
+                import io as _io
+                seg = AudioSegment.from_file(_io.BytesIO(content), format=source_ext)
+                buf = _io.BytesIO()
+                export_kwargs: dict[str, Any] = {"format": target_ext}
+                if target_ext == "mp3":
+                    export_kwargs["bitrate"] = "320k"
+                seg.export(buf, **export_kwargs)
+                content = buf.getvalue()
+            except Exception as e:
+                logger.error("Remote audio transcode (%s -> %s) failed: %s", source_ext, target_ext, e)
+                # Fall back to serving the original bytes so the user gets something usable.
+                target_ext = source_ext
+
+        media = "audio/mpeg" if target_ext == "mp3" else "audio/wav"
+        out_name = Path(filename).stem + f".{target_ext}"
+        from fastapi.responses import Response
+        return Response(
+            content=content,
+            media_type=media,
+            headers={
+                "Content-Disposition": f"attachment; filename={out_name}",
+                "Cache-Control": "public, max-age=86400, immutable",
+            },
+        )
+    except Exception as e:
+        logger.error("Remote audio proxy failed for %s: %s", url, e)
+        return None
 
 
 @app.get("/api/sessions/{session_id}/scripts")

@@ -1101,6 +1101,36 @@ class AudioProducerAgent(BaseAgent):
             "japan", "china", "mongolia", "laos",
         }
 
+        # When a primary voice is preselected from the Voice Library, prefer the
+        # voice's OWN accent over the campaign country for picking companions.
+        # Example: user picks an "Indian" voice for a Tanzania campaign — the
+        # two companion voices should be Indian-accented (matching the primary)
+        # rather than African-accented (matching the country).
+        _preselected_accent = (
+            ((voice_selection.get("selected_voice") or {}).get("accent") or "")
+            .lower()
+            .strip()
+        )
+        if _preselected_accent:
+            _accent = _preselected_accent
+            _is_sa = any(k in _accent for k in ("indian", "south asian", "south_asian", "tamil", "hindi", "bengali", "telugu", "kannada", "malayalam", "marathi", "gujarati", "punjabi"))
+            _is_af = any(k in _accent for k in ("african", "nigerian", "kenyan", "ghanaian", "ethiopian", "swahili", "south_african", "south african"))
+            _is_me = any(k in _accent for k in ("arabic", "middle east", "middle_eastern", "egyptian", "saudi", "emirati"))
+            _is_la = any(k in _accent for k in ("latin", "mexican", "brazilian", "spanish (lat", "portuguese (br"))
+            _is_ap = any(k in _accent for k in ("filipino", "indonesian", "malay", "thai", "vietnamese", "japanese", "korean", "chinese"))
+            if any([_is_sa, _is_af, _is_me, _is_la, _is_ap]):
+                # Only override if the voice's accent maps to a known region.
+                # "American"/"British"/"Neutral" voices fall through to the country-based pool.
+                is_south_asian = _is_sa
+                is_african = _is_af
+                is_middle_east = _is_me
+                is_latam = _is_la
+                is_apac = _is_ap
+                logger.info(
+                    f"[{self.name}] Companion voice region overridden by preselected accent '{_preselected_accent}' "
+                    f"(SA={_is_sa}, AF={_is_af}, ME={_is_me}, LATAM={_is_la}, APAC={_is_ap})"
+                )
+
         # ── Fetch user's voices from API (no accent filtering) ──
         api_female: list[tuple[str, str]] = []
         api_male: list[tuple[str, str]] = []

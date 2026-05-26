@@ -2008,16 +2008,19 @@ function HomePageContent() {
                               )}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {voiceFiles.map((af: AudioFile, i: number) => {
-                                  const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
-                                  const isPlaying = playingAudio === audioUrl;
-                                  const isLoading = loadingAudio === audioUrl;
+                                  // Playback: R2 public URL when available (fast, free egress).
+                                  // Download: always same-origin backend route so the fetch doesn't hit CORS.
+                                  const playUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
+                                  const downloadUrl = `/api/audio/${audioSessionId}/${af.file_name}`;
+                                  const isPlaying = playingAudio === playUrl;
+                                  const isLoading = loadingAudio === playUrl;
                                   return (
                                     <div
                                       key={i}
                                       className="flex items-center gap-2.5 p-3 rounded-xl bg-[var(--input-bg)] hover:bg-[var(--accent-subtle)]/30 transition-colors"
                                     >
                                       <button
-                                        onClick={() => toggleAudio(audioUrl)}
+                                        onClick={() => toggleAudio(playUrl)}
                                         className={`p-2 rounded-lg transition-colors ${isPlaying
                                             ? "bg-[var(--accent)] text-white"
                                             : isLoading
@@ -2038,7 +2041,7 @@ function HomePageContent() {
                                         )}
                                       </div>
                                       <button
-                                        onClick={() => forceDownload(audioUrl, af.file_name || "audio.mp3")}
+                                        onClick={() => forceDownload(downloadUrl, af.file_name || "audio.mp3")}
                                         className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--card)] transition-colors"
                                       >
                                         <Download className="w-3 h-3" />

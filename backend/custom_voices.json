@@ -76,5 +76,44 @@
     "category": "custom",
     "preview_url": "/api/voices/YkHbp3e8G9cEwq8igiKg/preview",
     "best_for_regions": []
+  },
+  {
+    "voice_id": "dOQi5SePW2oLH7pdyeq3",
+    "name": "Thendral",
+    "description": "Cheerful",
+    "labels": {
+      "accent": "Tamil, Indian",
+      "gender": "female",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": "/api/voices/dOQi5SePW2oLH7pdyeq3/preview",
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "3AMU7jXQuQa3oRvRqUmb",
+    "name": "Viraj",
+    "description": "TEST",
+    "labels": {
+      "accent": "Indian",
+      "gender": "",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": null,
+    "best_for_regions": []
+  },
+  {
+    "voice_id": "KSsyodh37PbfWy29kPtx",
+    "name": "Bunty",
+    "description": "test",
+    "labels": {
+      "accent": "Indian",
+      "gender": "male",
+      "age": ""
+    },
+    "category": "custom",
+    "preview_url": null,
+    "best_for_regions": []
   }
 ]

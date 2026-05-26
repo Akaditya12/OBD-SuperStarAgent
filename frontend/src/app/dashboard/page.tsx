@@ -605,12 +605,15 @@ export default function DashboardPage() {
                                   {stvAudioFiles.length > 0 && (
                                     <div className="flex items-center gap-4 p-4 rounded-xl bg-[var(--input-bg)] border border-[var(--card-border)]">
                                       {stvAudioFiles.map((af: AudioFile, ai: number) => {
-                                        const audioUrl = af.public_url || `/api/audio/${stvSessionId}/${af.file_name}`;
-                                        const isPlaying = playingAudio === audioUrl;
+                                        // Playback uses R2 (public_url) when available (zero egress on Cloudflare side),
+                                        // downloads always go through the backend (same-origin, no CORS, supports fmt transcode).
+                                        const playUrl = af.public_url || `/api/audio/${stvSessionId}/${af.file_name}`;
+                                        const downloadUrl = `/api/audio/${stvSessionId}/${af.file_name}`;
+                                        const isPlaying = playingAudio === playUrl;
                                         return (
                                           <div key={ai} className="flex items-center gap-3 flex-1">
                                             <button
-                                              onClick={() => toggleAudio(audioUrl)}
+                                              onClick={() => toggleAudio(playUrl)}
                                               className={`p-2.5 rounded-xl transition-all ${
                                                 isPlaying
                                                   ? "bg-[var(--accent)] text-white"
@@ -625,7 +628,7 @@ export default function DashboardPage() {
                                             </div>
                                             <div className="flex items-center gap-1.5">
                                               <button
-                                                onClick={() => downloadAudioAs(audioUrl, campaign.name, "mp3")}
+                                                onClick={() => downloadAudioAs(downloadUrl, campaign.name, "mp3")}
                                                 title="Download as MP3"
                                                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-[var(--accent)] bg-[var(--accent-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all border border-[var(--accent)]/20"
                                               >
@@ -633,7 +636,7 @@ export default function DashboardPage() {
                                                 MP3
                                               </button>
                                               <button
-                                                onClick={() => downloadAudioAs(audioUrl, campaign.name, "wav")}
+                                                onClick={() => downloadAudioAs(downloadUrl, campaign.name, "wav")}
                                                 title="Download as WAV"
                                                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-[var(--accent)] bg-[var(--accent-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all border border-[var(--accent)]/20"
                                               >
@@ -928,13 +931,15 @@ export default function DashboardPage() {
                                       {/* Audio controls inline + Regenerate this variant */}
                                       <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-[var(--card-border)]">
                                         {variantAudio.length > 0 && variantAudio.map((af: AudioFile, ai: number) => {
-                                          const audioUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
+                                          // Playback via R2 (fast, zero egress), downloads via backend (same-origin, no CORS, supports fmt transcode).
+                                          const playUrl = af.public_url || `/api/audio/${audioSessionId}/${af.file_name}`;
+                                          const downloadUrl = `/api/audio/${audioSessionId}/${af.file_name}`;
                                           const label = af.file_name?.replace(/\.(mp3|wav)$/, "").replace(`variant_${vid}_`, "") || `audio_${ai}`;
-                                          const isPlaying = playingAudio === audioUrl;
+                                          const isPlaying = playingAudio === playUrl;
                                           return (
                                             <div key={ai} className="flex items-center gap-1.5">
                                               <button
-                                                onClick={() => toggleAudio(audioUrl)}
+                                                onClick={() => toggleAudio(playUrl)}
                                                 className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${isPlaying
                                                   ? "bg-[var(--accent)] text-white shadow-sm"
                                                   : "bg-[var(--card)] border border-[var(--card-border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
@@ -944,14 +949,14 @@ export default function DashboardPage() {
                                                 {label}
                                               </button>
                                               <button
-                                                onClick={() => downloadAudioAs(audioUrl, `${campaign.name}_v${vid}_${audioSectionLabel(af.file_name)}`, "mp3")}
+                                                onClick={() => downloadAudioAs(downloadUrl, `${campaign.name}_v${vid}_${audioSectionLabel(af.file_name)}`, "mp3")}
                                                 title="Download MP3"
                                                 className="px-1.5 py-0.5 rounded text-[9px] font-semibold text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
                                               >
                                                 MP3
                                               </button>
                                               <button
-                                                onClick={() => downloadAudioAs(audioUrl, `${campaign.name}_v${vid}_${audioSectionLabel(af.file_name)}`, "wav")}
+                                                onClick={() => downloadAudioAs(downloadUrl, `${campaign.name}_v${vid}_${audioSectionLabel(af.file_name)}`, "wav")}
                                                 title="Download WAV"
                                                 className="px-1.5 py-0.5 rounded text-[9px] font-semibold text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
                                               >
